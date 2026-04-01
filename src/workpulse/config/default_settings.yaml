@@ -1,0 +1,2 @@
+poll_interval_seconds: 30
+archive_retention_days: 90

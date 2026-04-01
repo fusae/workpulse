@@ -13,6 +13,7 @@ from typing import Optional
 
 from workpulse.classifier import Classifier
 from workpulse.platform.base import get_platform
+from workpulse.settings import DEFAULT_POLL_INTERVAL, load_settings
 
 logger = logging.getLogger("workpulse")
 
@@ -21,8 +22,7 @@ DB_PATH = DATA_DIR / "activity.db"
 PID_PATH = DATA_DIR / "workpulse.pid"
 LOG_PATH = DATA_DIR / "workpulse.log"
 
-POLL_INTERVAL = 30  # 秒
-ARCHIVE_RETENTION_DAYS = 90
+POLL_INTERVAL = DEFAULT_POLL_INTERVAL  # 历史兼容默认值
 
 
 def _ensure_data_dir():
@@ -142,8 +142,10 @@ def record_event(event_type: str, details: Optional[dict] = None, conn: Optional
         conn.close()
 
 
-def archive_old_activities(retention_days: int = ARCHIVE_RETENTION_DAYS, conn: Optional[sqlite3.Connection] = None) -> int:
+def archive_old_activities(retention_days: Optional[int] = None, conn: Optional[sqlite3.Connection] = None) -> int:
     """将保留期之外的数据转移到归档表。"""
+    if retention_days is None:
+        retention_days = load_settings().archive_retention_days
     owns_conn = conn is None
     if conn is None:
         conn = get_db()
@@ -227,6 +229,7 @@ class Tracker:
     def __init__(self):
         self.platform = get_platform()
         self.classifier = Classifier()
+        self.settings = load_settings()
         self.running = False
         self._conn: Optional[sqlite3.Connection] = None
         self._buffer: list = []  # 写入失败时的缓冲队列
@@ -253,7 +256,15 @@ class Tracker:
         timestamp = _utc_now()
         platform_name = _get_platform_name()
 
-        row = (timestamp, app_name, window_title, category, is_idle, platform_name, POLL_INTERVAL)
+        row = (
+            timestamp,
+            app_name,
+            window_title,
+            category,
+            is_idle,
+            platform_name,
+            self.settings.poll_interval_seconds,
+        )
 
         try:
             conn = self._get_conn()
@@ -295,7 +306,7 @@ class Tracker:
                 self._record()
             except Exception as e:
                 logger.error("记录异常: %s", e, exc_info=True)
-            time.sleep(POLL_INTERVAL)
+            time.sleep(self.settings.poll_interval_seconds)
 
         if self._conn:
             self._conn.close()

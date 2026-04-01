@@ -79,6 +79,14 @@ def main():
         help="自启动操作",
     )
 
+    # config
+    config_parser = subparsers.add_parser("config", help="查看当前配置")
+    config_parser.add_argument(
+        "action",
+        choices=["show"],
+        help="配置操作",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -127,6 +135,14 @@ def main():
             disable_autostart()
         else:
             show_autostart_status()
+
+    elif args.command == "config":
+        from workpulse.settings import SETTINGS_PATH, load_settings
+
+        settings = load_settings()
+        print(f"settings_path: {SETTINGS_PATH}")
+        print(f"poll_interval_seconds: {settings.poll_interval_seconds}")
+        print(f"archive_retention_days: {settings.archive_retention_days}")
 
 
 if __name__ == "__main__":

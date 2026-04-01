@@ -110,6 +110,12 @@ workpulse autostart enable
 workpulse autostart disable
 ```
 
+查看当前配置：
+
+```bash
+workpulse config show
+```
+
 清理旧数据：
 
 ```bash
@@ -152,6 +158,7 @@ WorkPulse 默认把数据存放在用户目录下：
 
 - 数据库：`~/.workpulse/activity.db`
 - 规则文件：`~/.workpulse/rules.yaml`
+- 配置文件：`~/.workpulse/settings.yaml`
 - 日志文件：`~/.workpulse/workpulse.log`
 - PID 文件：`~/.workpulse/workpulse.pid`
 
