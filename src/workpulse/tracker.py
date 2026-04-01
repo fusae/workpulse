@@ -29,6 +29,15 @@ def _ensure_data_dir():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str):
+    columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def _init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS activities (
@@ -38,9 +47,11 @@ def _init_db(conn: sqlite3.Connection):
             window_title TEXT,
             category TEXT,
             is_idle BOOLEAN DEFAULT FALSE,
-            platform TEXT NOT NULL
+            platform TEXT NOT NULL,
+            sample_seconds INTEGER NOT NULL DEFAULT 30
         )
     """)
+    _ensure_column(conn, "activities", "sample_seconds", "sample_seconds INTEGER NOT NULL DEFAULT 30")
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_activities_timestamp
         ON activities(timestamp)
@@ -55,9 +66,11 @@ def _init_db(conn: sqlite3.Connection):
             window_title TEXT,
             category TEXT,
             is_idle BOOLEAN DEFAULT FALSE,
-            platform TEXT NOT NULL
+            platform TEXT NOT NULL,
+            sample_seconds INTEGER NOT NULL DEFAULT 30
         )
     """)
+    _ensure_column(conn, "activity_archive", "sample_seconds", "sample_seconds INTEGER NOT NULL DEFAULT 30")
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_activity_archive_timestamp
         ON activity_archive(timestamp)
@@ -138,7 +151,7 @@ def archive_old_activities(retention_days: int = ARCHIVE_RETENTION_DAYS, conn: O
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     rows = conn.execute(
         """
-        SELECT id, timestamp, app_name, window_title, category, is_idle, platform
+        SELECT id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds
         FROM activities
         WHERE timestamp < ?
         ORDER BY timestamp
@@ -155,8 +168,8 @@ def archive_old_activities(retention_days: int = ARCHIVE_RETENTION_DAYS, conn: O
     conn.executemany(
         """
         INSERT INTO activity_archive (
-            archived_at, original_id, timestamp, app_name, window_title, category, is_idle, platform
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            archived_at, original_id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -168,6 +181,7 @@ def archive_old_activities(retention_days: int = ARCHIVE_RETENTION_DAYS, conn: O
                 row["category"],
                 row["is_idle"],
                 row["platform"],
+                row["sample_seconds"],
             )
             for row in rows
         ],
@@ -239,23 +253,23 @@ class Tracker:
         timestamp = _utc_now()
         platform_name = _get_platform_name()
 
-        row = (timestamp, app_name, window_title, category, is_idle, platform_name)
+        row = (timestamp, app_name, window_title, category, is_idle, platform_name, POLL_INTERVAL)
 
         try:
             conn = self._get_conn()
             # 先写入缓冲区中的数据
             if self._buffer:
                 conn.executemany(
-                    "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     self._buffer,
                 )
                 logger.info("缓冲区 %d 条记录已写入", len(self._buffer))
                 self._buffer.clear()
 
             conn.execute(
-                "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
             conn.commit()

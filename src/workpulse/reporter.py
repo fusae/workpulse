@@ -16,6 +16,12 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def _row_seconds(row: Dict[str, object]) -> float:
+    if "seconds" in row:
+        return float(row["seconds"])
+    return float(row.get("samples", 0)) * POLL_INTERVAL
+
+
 def _get_time_range(period: str, now: Optional[datetime] = None) -> Tuple[str, str]:
     """根据 period 返回 UTC 时间范围 (start, end)。"""
     local_now = now.astimezone() if now is not None else datetime.now().astimezone()
@@ -41,21 +47,26 @@ def _get_time_range(period: str, now: Optional[datetime] = None) -> Tuple[str, s
 
 def _get_app_rows(conn, start: str, end: str) -> List[Dict[str, object]]:
     rows = conn.execute("""
-        SELECT app_name, COALESCE(category, '其他') as category, COUNT(*) as samples
+        SELECT
+            app_name,
+            COALESCE(category, '其他') as category,
+            COUNT(*) as samples,
+            SUM(COALESCE(sample_seconds, ?)) as seconds
         FROM activities
         WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
         GROUP BY app_name, category
-        ORDER BY samples DESC
-    """, (start, end)).fetchall()
+        ORDER BY seconds DESC
+    """, (POLL_INTERVAL, start, end)).fetchall()
 
     apps: Dict[str, Dict[str, object]] = {}
     for row in rows:
         app = apps.setdefault(
             row["app_name"],
-            {"app_name": row["app_name"], "samples": 0, "categories": []},
+            {"app_name": row["app_name"], "samples": 0, "seconds": 0, "categories": []},
         )
         app["samples"] += row["samples"]
-        app["categories"].append((row["category"], row["samples"]))
+        app["seconds"] += row["seconds"]
+        app["categories"].append((row["category"], row["seconds"]))
 
     app_rows = []
     for app in apps.values():
@@ -70,11 +81,12 @@ def _get_app_rows(conn, start: str, end: str) -> List[Dict[str, object]]:
             {
                 "app_name": app["app_name"],
                 "samples": app["samples"],
+                "seconds": app["seconds"],
                 "category": category_label,
             }
         )
 
-    app_rows.sort(key=lambda item: item["samples"], reverse=True)
+    app_rows.sort(key=lambda item: item["seconds"], reverse=True)
     return app_rows[:15]
 
 
@@ -83,24 +95,24 @@ def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     conn = get_db()
 
     category_rows = conn.execute("""
-        SELECT category, COUNT(*) as samples, is_idle
+        SELECT category, SUM(COALESCE(sample_seconds, ?)) as seconds, is_idle
         FROM activities
         WHERE timestamp >= ? AND timestamp < ?
         GROUP BY category, is_idle
-        ORDER BY samples DESC
-    """, (start, end)).fetchall()
+        ORDER BY seconds DESC
+    """, (POLL_INTERVAL, start, end)).fetchall()
 
     app_rows = _get_app_rows(conn, start, end)
 
     title_rows = conn.execute("""
-        SELECT app_name, window_title, COUNT(*) as samples
+        SELECT app_name, window_title, COUNT(*) as samples, SUM(COALESCE(sample_seconds, ?)) as seconds
         FROM activities
         WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
           AND window_title != ''
         GROUP BY app_name, window_title
-        ORDER BY samples DESC
+        ORDER BY seconds DESC
         LIMIT 10
-    """, (start, end)).fetchall()
+    """, (POLL_INTERVAL, start, end)).fetchall()
 
     total = conn.execute("""
         SELECT COUNT(*) as cnt FROM activities
@@ -126,7 +138,7 @@ def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     categories = {}
     idle_time = 0
     for row in category_rows:
-        seconds = row["samples"] * POLL_INTERVAL
+        seconds = row["seconds"] or 0
         if row["is_idle"]:
             idle_time += seconds
         else:
@@ -212,7 +224,7 @@ def _format_table(period, categories, active_total, idle_time, app_rows, title_r
     lines.append(f"  {'应用':<20} {'时长':<10} {'分类':<8}")
     lines.append(f"  {'-' * 40}")
     for row in app_rows:
-        seconds = row["samples"] * POLL_INTERVAL
+        seconds = _row_seconds(row)
         lines.append(f"  {row['app_name']:<20} {_format_duration(seconds):<10} {row['category']}")
     lines.append("")
 
@@ -225,7 +237,7 @@ def _format_table(period, categories, active_total, idle_time, app_rows, title_r
             title = row["window_title"]
             if len(title) > 32:
                 title = title[:32] + "..."
-            seconds = row["samples"] * POLL_INTERVAL
+            seconds = _row_seconds(row)
             lines.append(f"  {row['app_name']:<15} {title:<35} {_format_duration(seconds)}")
 
     if analysis:
@@ -268,7 +280,7 @@ def _format_markdown(period, categories, active_total, idle_time, app_rows, titl
     lines.append("| 应用 | 时长 | 分类 |")
     lines.append("|------|------|------|")
     for row in app_rows:
-        seconds = row["samples"] * POLL_INTERVAL
+        seconds = _row_seconds(row)
         lines.append(f"| {row['app_name']} | {_format_duration(seconds)} | {row['category']} |")
     lines.append("")
 
@@ -282,7 +294,7 @@ def _format_markdown(period, categories, active_total, idle_time, app_rows, titl
             title = row["window_title"]
             if len(title) > 50:
                 title = title[:50] + "..."
-            seconds = row["samples"] * POLL_INTERVAL
+            seconds = _row_seconds(row)
             lines.append(f"| {row['app_name']} | {title} | {_format_duration(seconds)} |")
 
     if analysis:
@@ -304,11 +316,11 @@ def _format_html(period, categories, active_total, idle_time, app_rows, title_ro
         for cat, seconds in sorted(categories.items(), key=lambda x: -x[1])
     )
     app_table_rows = "".join(
-        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{_format_duration(row['samples'] * POLL_INTERVAL)}</td><td>{html.escape(str(row['category']))}</td></tr>"
+        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{_format_duration(_row_seconds(row))}</td><td>{html.escape(str(row['category']))}</td></tr>"
         for row in app_rows
     )
     title_table_rows = "".join(
-        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{html.escape(str(row['window_title']))}</td><td>{_format_duration(row['samples'] * POLL_INTERVAL)}</td></tr>"
+        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{html.escape(str(row['window_title']))}</td><td>{_format_duration(_row_seconds(row))}</td></tr>"
         for row in title_rows
     )
 

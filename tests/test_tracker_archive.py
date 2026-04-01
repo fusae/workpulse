@@ -24,12 +24,12 @@ class TrackerArchiveTests(unittest.TestCase):
             new_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
             conn.executemany(
                 """
-                INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    (old_ts, "Code", "legacy.py", "编码", 0, "windows"),
-                    (new_ts, "Chrome", "Recent", "浏览", 0, "windows"),
+                    (old_ts, "Code", "legacy.py", "编码", 0, "windows", 45),
+                    (new_ts, "Chrome", "Recent", "浏览", 0, "windows", 30),
                 ],
             )
             conn.commit()
@@ -45,6 +45,10 @@ class TrackerArchiveTests(unittest.TestCase):
                 conn.execute("SELECT COUNT(*) AS cnt FROM activity_archive").fetchone()["cnt"],
                 1,
             )
+            archived_row = conn.execute(
+                "SELECT sample_seconds FROM activity_archive LIMIT 1"
+            ).fetchone()
+            self.assertEqual(archived_row["sample_seconds"], 45)
             self.assertEqual(
                 conn.execute(
                     "SELECT COUNT(*) AS cnt FROM tracker_events WHERE event_type = 'archive_completed'"
