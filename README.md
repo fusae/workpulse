@@ -135,6 +135,13 @@ workpulse doctor
 workpulse doctor --format json
 ```
 
+导出活动明细：
+
+```bash
+workpulse export --format csv --source active --output activities.csv
+workpulse export --format json --source all --from-date 2026-03-01 --to-date 2026-03-07
+```
+
 清理旧数据：
 
 ```bash

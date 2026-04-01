@@ -134,6 +134,33 @@ def main():
         help="输出格式 (默认: markdown)",
     )
 
+    # export
+    export_parser = subparsers.add_parser("export", help="导出活动明细")
+    export_parser.add_argument(
+        "--format",
+        dest="fmt",
+        default="csv",
+        choices=["csv", "json"],
+        help="导出格式 (默认: csv)",
+    )
+    export_parser.add_argument(
+        "--source",
+        dest="source",
+        default="active",
+        choices=["active", "archive", "all"],
+        help="导出来源 (默认: active)",
+    )
+    export_parser.add_argument(
+        "period",
+        nargs="?",
+        default="today",
+        choices=["today", "yesterday", "week"],
+        help="导出时间范围 (默认: today)",
+    )
+    export_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
+    export_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
+    export_parser.add_argument("--output", help="将导出写入指定文件路径")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -221,6 +248,22 @@ def main():
         from workpulse.doctor import run_doctor
 
         print(run_doctor(fmt=args.fmt))
+
+    elif args.command == "export":
+        from workpulse.exporter import export_activities
+
+        output = export_activities(
+            fmt=args.fmt,
+            source=args.source,
+            period=args.period,
+            start_date=args.from_date,
+            end_date=args.to_date,
+        )
+        if args.output:
+            with open(args.output, "w", encoding="utf-8", newline="") as f:
+                f.write(output)
+        else:
+            print(output, end="" if output.endswith("\n") else "\n")
 
 
 if __name__ == "__main__":
