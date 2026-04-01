@@ -45,6 +45,12 @@ python -m pip install --upgrade pip
 pip install ".[windows]"
 ```
 
+如果要给没有 Python 环境的 Windows 用户分发，可使用 PyInstaller 构建：
+
+```powershell
+.\scripts\build_windows.ps1 -Clean
+```
+
 ## 权限说明
 
 在 macOS 上，首次使用通常需要为终端或 Python 进程授予以下权限：
@@ -192,6 +198,7 @@ PYTHONPATH=src python3 -m workpulse --help
 设计文档：
 
 - [docs/design.md](/Users/jamesyu/Projects/workpulse/docs/design.md)
+- [docs/windows-release.md](/Users/jamesyu/Projects/workpulse/docs/windows-release.md)
 
 ## 当前限制
 
