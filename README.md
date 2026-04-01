@@ -80,6 +80,7 @@ workpulse status
 workpulse report
 workpulse report yesterday
 workpulse report week --format markdown
+workpulse report week --format html --with-analysis --output report.html
 ```
 
 停止追踪：

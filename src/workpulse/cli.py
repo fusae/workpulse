@@ -33,8 +33,17 @@ def main():
         "--format",
         dest="fmt",
         default="table",
-        choices=["table", "markdown"],
+        choices=["table", "markdown", "html"],
         help="输出格式 (默认: table)",
+    )
+    report_parser.add_argument(
+        "--with-analysis",
+        action="store_true",
+        help="在报告中附带启发式分析摘要",
+    )
+    report_parser.add_argument(
+        "--output",
+        help="将输出写入指定文件路径",
     )
 
     # analyze
@@ -82,7 +91,16 @@ def main():
 
     elif args.command == "report":
         from workpulse.reporter import generate_report
-        print(generate_report(period=args.period, fmt=args.fmt))
+        output = generate_report(
+            period=args.period,
+            fmt=args.fmt,
+            include_analysis=args.with_analysis,
+        )
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+        else:
+            print(output)
 
     elif args.command == "analyze":
         from workpulse.ai_analyzer import format_analysis

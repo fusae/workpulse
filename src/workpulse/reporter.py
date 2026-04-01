@@ -1,5 +1,6 @@
 """报告生成 - 按时间范围生成工作时间分配报告"""
 
+import html
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -153,7 +154,7 @@ def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     }
 
 
-def generate_report(period: str = "today", fmt: str = "table") -> str:
+def generate_report(period: str = "today", fmt: str = "table", include_analysis: bool = False) -> str:
     """生成报告
 
     Args:
@@ -168,14 +169,20 @@ def generate_report(period: str = "today", fmt: str = "table") -> str:
     idle_time = snapshot["idle_time"]
     app_rows = snapshot["apps"]
     title_rows = snapshot["titles"]
+    analysis = None
+    if include_analysis:
+        from workpulse.ai_analyzer import analyze_period
+        analysis = analyze_period(period)
 
+    if fmt == "html":
+        return _format_html(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
     if fmt == "markdown":
-        return _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows)
+        return _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
     else:
-        return _format_table(period, categories, active_total, idle_time, app_rows, title_rows)
+        return _format_table(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
 
 
-def _format_table(period, categories, active_total, idle_time, app_rows, title_rows) -> str:
+def _format_table(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
     lines = []
     period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
     label = period_labels.get(period, period)
@@ -221,12 +228,20 @@ def _format_table(period, categories, active_total, idle_time, app_rows, title_r
             seconds = row["samples"] * POLL_INTERVAL
             lines.append(f"  {row['app_name']:<15} {title:<35} {_format_duration(seconds)}")
 
+    if analysis:
+        lines.append("")
+        lines.append("  [分析摘要]")
+        for item in analysis["findings"]:
+            lines.append(f"  - {item}")
+        for item in analysis["suggestions"]:
+            lines.append(f"  - 建议：{item}")
+
     lines.append("")
     lines.append(f"{'=' * 50}")
     return "\n".join(lines)
 
 
-def _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows) -> str:
+def _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
     lines = []
     period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
     label = period_labels.get(period, period)
@@ -270,4 +285,153 @@ def _format_markdown(period, categories, active_total, idle_time, app_rows, titl
             seconds = row["samples"] * POLL_INTERVAL
             lines.append(f"| {row['app_name']} | {title} | {_format_duration(seconds)} |")
 
+    if analysis:
+        lines.extend(["", "## 分析摘要", ""])
+        for item in analysis["findings"]:
+            lines.append(f"- {item}")
+        for item in analysis["suggestions"]:
+            lines.append(f"- 建议：{item}")
+
     return "\n".join(lines)
+
+
+def _format_html(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
+    label = period_labels.get(period, period)
+
+    category_rows = "".join(
+        f"<tr><td>{html.escape(cat)}</td><td>{_format_duration(seconds)}</td><td>{(seconds / active_total * 100) if active_total else 0:.1f}%</td></tr>"
+        for cat, seconds in sorted(categories.items(), key=lambda x: -x[1])
+    )
+    app_table_rows = "".join(
+        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{_format_duration(row['samples'] * POLL_INTERVAL)}</td><td>{html.escape(str(row['category']))}</td></tr>"
+        for row in app_rows
+    )
+    title_table_rows = "".join(
+        f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{html.escape(str(row['window_title']))}</td><td>{_format_duration(row['samples'] * POLL_INTERVAL)}</td></tr>"
+        for row in title_rows
+    )
+
+    analysis_block = ""
+    if analysis:
+        findings = "".join(f"<li>{html.escape(item)}</li>" for item in analysis["findings"])
+        suggestions = "".join(f"<li>{html.escape(item)}</li>" for item in analysis["suggestions"])
+        analysis_block = f"""
+        <section>
+          <h2>分析摘要</h2>
+          <h3>观察</h3>
+          <ul>{findings}</ul>
+          <h3>建议</h3>
+          <ul>{suggestions}</ul>
+        </section>
+        """
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkPulse {label}报告</title>
+  <style>
+    :root {{
+      --bg: #f5f1e8;
+      --card: #fffdf8;
+      --ink: #1f1b16;
+      --muted: #6f6254;
+      --accent: #b65c2d;
+      --line: #e3d8c8;
+    }}
+    body {{
+      margin: 0;
+      background: linear-gradient(180deg, #efe7da 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+    }}
+    main {{
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    .hero, section {{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 18px;
+      box-shadow: 0 12px 30px rgba(79, 58, 38, 0.08);
+    }}
+    .metrics {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }}
+    .metric {{
+      padding: 14px;
+      border-radius: 14px;
+      background: #fbf7ef;
+      border: 1px solid var(--line);
+    }}
+    .metric .label {{
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 6px;
+    }}
+    .metric .value {{
+      font-size: 28px;
+      color: var(--accent);
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+    }}
+    th {{
+      color: var(--muted);
+      font-weight: normal;
+    }}
+    h1, h2, h3 {{
+      margin-top: 0;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <h1>WorkPulse {label}报告</h1>
+      <div class="metrics">
+        <div class="metric"><span class="label">活跃时间</span><span class="value">{_format_duration(active_total)}</span></div>
+        <div class="metric"><span class="label">空闲时间</span><span class="value">{_format_duration(idle_time)}</span></div>
+      </div>
+    </section>
+    <section>
+      <h2>分类统计</h2>
+      <table>
+        <thead><tr><th>分类</th><th>时长</th><th>占比</th></tr></thead>
+        <tbody>{category_rows}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>应用统计</h2>
+      <table>
+        <thead><tr><th>应用</th><th>时长</th><th>分类</th></tr></thead>
+        <tbody>{app_table_rows}</tbody>
+      </table>
+    </section>
+    <section>
+      <h2>活动详情 Top 10</h2>
+      <table>
+        <thead><tr><th>应用</th><th>窗口标题</th><th>时长</th></tr></thead>
+        <tbody>{title_table_rows}</tbody>
+      </table>
+    </section>
+    {analysis_block}
+  </main>
+</body>
+</html>
+"""
