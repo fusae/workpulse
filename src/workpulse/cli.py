@@ -161,6 +161,33 @@ def main():
     export_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
     export_parser.add_argument("--output", help="将导出写入指定文件路径")
 
+    # daily-report
+    daily_parser = subparsers.add_parser("daily-report", help="生成结构化日报")
+    daily_parser.add_argument(
+        "period",
+        nargs="?",
+        default="today",
+        choices=["today", "yesterday", "week"],
+        help="日报时间范围 (默认: today)",
+    )
+    daily_parser.add_argument(
+        "--format",
+        dest="fmt",
+        default="markdown",
+        choices=["markdown", "json"],
+        help="输出格式 (默认: markdown)",
+    )
+    daily_parser.add_argument(
+        "--provider",
+        dest="provider",
+        default=None,
+        choices=["heuristic", "llm", "auto"],
+        help="日报提供方 (默认: 使用配置)",
+    )
+    daily_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
+    daily_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
+    daily_parser.add_argument("--output", help="将日报写入指定文件路径")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -264,6 +291,22 @@ def main():
                 f.write(output)
         else:
             print(output, end="" if output.endswith("\n") else "\n")
+
+    elif args.command == "daily-report":
+        from workpulse.daily_report import generate_daily_report
+
+        output = generate_daily_report(
+            period=args.period,
+            fmt=args.fmt,
+            start_date=args.from_date,
+            end_date=args.to_date,
+            provider=args.provider,
+        )
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(output)
+        else:
+            print(output)
 
 
 if __name__ == "__main__":

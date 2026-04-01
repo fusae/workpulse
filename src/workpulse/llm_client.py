@@ -18,41 +18,31 @@ def llm_is_configured() -> bool:
     return bool(os.environ.get(settings.llm_api_key_env))
 
 
-def analyze_with_llm(snapshot: Dict[str, object], heuristic: Dict[str, List[str]]) -> Dict[str, object]:
+def request_json(system_prompt: str, payload: Dict[str, object]) -> Dict[str, object]:
     settings = load_settings()
     api_key = os.environ.get(settings.llm_api_key_env)
     if not api_key:
         raise LLMError(f"缺少环境变量 {settings.llm_api_key_env}")
 
-    payload = {
+    request_payload = {
         "model": settings.llm_model,
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "你是一个工作效率分析助手。请基于用户提供的活动摘要输出 JSON，"
-                    "字段必须包含 summary, findings, suggestions。"
-                    "summary 是一段简短中文总结；findings 和 suggestions 是字符串数组。"
-                ),
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": json.dumps(
-                    {
-                        "snapshot": snapshot,
-                        "heuristic": heuristic,
-                    },
-                    ensure_ascii=False,
-                ),
+                "content": json.dumps(payload, ensure_ascii=False),
             },
         ],
     }
 
     request = urllib.request.Request(
         settings.llm_endpoint,
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(request_payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -69,9 +59,23 @@ def analyze_with_llm(snapshot: Dict[str, object], heuristic: Dict[str, List[str]
     try:
         result = json.loads(body)
         content = result["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
+        return json.loads(content)
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
         raise LLMError(f"LLM 返回格式无法解析: {exc}") from exc
+
+
+def analyze_with_llm(snapshot: Dict[str, object], heuristic: Dict[str, List[str]]) -> Dict[str, object]:
+    parsed = request_json(
+        (
+            "你是一个工作效率分析助手。请基于用户提供的活动摘要输出 JSON，"
+            "字段必须包含 summary, findings, suggestions。"
+            "summary 是一段简短中文总结；findings 和 suggestions 是字符串数组。"
+        ),
+        {
+            "snapshot": snapshot,
+            "heuristic": heuristic,
+        },
+    )
 
     return {
         "summary": str(parsed.get("summary", "")),

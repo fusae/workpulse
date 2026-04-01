@@ -142,6 +142,14 @@ workpulse export --format csv --source active --output activities.csv
 workpulse export --format json --source all --from-date 2026-03-01 --to-date 2026-03-07
 ```
 
+生成结构化日报：
+
+```bash
+workpulse daily-report
+workpulse daily-report --provider llm
+workpulse daily-report --from-date 2026-03-01 --to-date 2026-03-07 --output daily-report.md
+```
+
 清理旧数据：
 
 ```bash
