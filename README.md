@@ -89,6 +89,13 @@ workpulse report week --format markdown
 workpulse report week --format html --with-analysis --output report.html
 ```
 
+生成工作分析：
+
+```bash
+workpulse analyze
+workpulse analyze week --format json
+```
+
 停止追踪：
 
 ```bash
@@ -205,7 +212,8 @@ PYTHONPATH=src python3 -m workpulse --help
 - 这是一个本地优先的轻量工具，暂不包含云同步
 - 分类准确度依赖用户规则配置
 - 浏览器类应用可能覆盖多种活动场景，报告会尽量标记为多分类
-- `ai_analyzer` 仍是预留模块，尚未接入实际模型分析
+- 当前分析模块是启发式分析，还没有接入真实 LLM
+- 当前提供的是打包工作流和构建脚本，不是完整安装器
 
 ## License
 
