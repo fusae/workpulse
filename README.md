@@ -36,6 +36,15 @@ Windows:
 pip install ".[windows]"
 ```
 
+Windows 推荐使用 Python 3.10 或 3.11，并优先在 PowerShell 中安装：
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install ".[windows]"
+```
+
 ## 权限说明
 
 在 macOS 上，首次使用通常需要为终端或 Python 进程授予以下权限：
@@ -83,6 +92,36 @@ workpulse stop
 
 ```bash
 workpulse prune --before 2026-01-01
+```
+
+## Windows 使用建议
+
+首次在 Windows 上使用时，建议先确认以下几点：
+
+- 使用普通桌面会话，不要在远程受限环境里测试前台窗口采集
+- PowerShell 或终端不要以会频繁被关闭的临时窗口运行
+- 某些安全软件可能会拦截窗口访问或后台进程创建
+- 如果你使用的是公司设备，可能会受到系统策略限制
+
+建议先手动验证一遍主流程：
+
+```powershell
+workpulse start
+workpulse status
+workpulse report
+workpulse stop
+```
+
+如果 `status` 显示已运行，但没有数据，优先检查：
+
+- 是否确实在桌面前台切换过应用
+- 当前 Python 环境里是否安装了 `psutil` 和 `pywin32`
+- 杀毒软件或企业安全策略是否拦截了后台采集
+
+检查 Windows 扩展依赖：
+
+```powershell
+python -c "import psutil, win32gui, win32process; print('ok')"
 ```
 
 ## 数据位置
