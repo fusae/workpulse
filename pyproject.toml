@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "workpulse"
+version = "0.1.0"
+description = "个人工作效率助手 - 自动追踪工作时间并生成报告"
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+windows = ["psutil>=5.9", "pywin32>=306"]
+macos = ["pyobjc-framework-Cocoa>=10.0", "pyobjc-framework-Quartz>=10.0"]
+
+[project.scripts]
+workpulse = "workpulse.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+workpulse = ["config/*.yaml"]
