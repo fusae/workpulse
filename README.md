@@ -123,6 +123,13 @@ workpulse autostart disable
 workpulse config show
 ```
 
+检查运行环境：
+
+```bash
+workpulse doctor
+workpulse doctor --format json
+```
+
 清理旧数据：
 
 ```bash

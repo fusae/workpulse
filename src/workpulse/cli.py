@@ -104,6 +104,16 @@ def main():
         help="配置操作",
     )
 
+    # doctor
+    doctor_parser = subparsers.add_parser("doctor", help="检查运行环境")
+    doctor_parser.add_argument(
+        "--format",
+        dest="fmt",
+        default="markdown",
+        choices=["markdown", "json"],
+        help="输出格式 (默认: markdown)",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -164,6 +174,11 @@ def main():
         print(f"settings_path: {SETTINGS_PATH}")
         print(f"poll_interval_seconds: {settings.poll_interval_seconds}")
         print(f"archive_retention_days: {settings.archive_retention_days}")
+
+    elif args.command == "doctor":
+        from workpulse.doctor import run_doctor
+
+        print(run_doctor(fmt=args.fmt))
 
 
 if __name__ == "__main__":
