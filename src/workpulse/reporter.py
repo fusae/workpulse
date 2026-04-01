@@ -1,7 +1,7 @@
 """报告生成 - 按时间范围生成工作时间分配报告"""
 
 import html
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from workpulse.tracker import get_db, POLL_INTERVAL
@@ -22,26 +22,68 @@ def _row_seconds(row: Dict[str, object]) -> float:
     return float(row.get("samples", 0)) * POLL_INTERVAL
 
 
-def _get_time_range(period: str, now: Optional[datetime] = None) -> Tuple[str, str]:
+def _parse_local_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _get_time_range(
+    period: str,
+    now: Optional[datetime] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Tuple[str, str, str]:
     """根据 period 返回 UTC 时间范围 (start, end)。"""
     local_now = now.astimezone() if now is not None else datetime.now().astimezone()
     today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    if start_date or end_date:
+        if start_date is None:
+            start_date = end_date
+        if end_date is None:
+            end_date = start_date
+
+        start_local_date = _parse_local_date(start_date)
+        end_local_date = _parse_local_date(end_date)
+        if start_local_date > end_local_date:
+            raise ValueError("start_date 不能晚于 end_date")
+
+        start = today_start.replace(
+            year=start_local_date.year,
+            month=start_local_date.month,
+            day=start_local_date.day,
+        )
+        local_now = today_start.replace(
+            year=end_local_date.year,
+            month=end_local_date.month,
+            day=end_local_date.day,
+        ) + timedelta(days=1)
+        label = f"{start_date} 至 {end_date}"
+        return (
+            start.astimezone(timezone.utc).isoformat(),
+            local_now.astimezone(timezone.utc).isoformat(),
+            label,
+        )
+
     if period == "today":
         start = today_start
+        label = "今日"
     elif period == "yesterday":
         start = today_start - timedelta(days=1)
         local_now = today_start  # 到今天 0 点
+        label = "昨日"
     elif period == "week":
         # 本周一开始
         weekday = local_now.weekday()
         start = today_start - timedelta(days=weekday)
+        label = "本周"
     else:
         start = today_start
+        label = period
 
     return (
         start.astimezone(timezone.utc).isoformat(),
         local_now.astimezone(timezone.utc).isoformat(),
+        label,
     )
 
 
@@ -90,8 +132,12 @@ def _get_app_rows(conn, start: str, end: str) -> List[Dict[str, object]]:
     return app_rows[:15]
 
 
-def get_report_snapshot(period: str = "today") -> Dict[str, object]:
-    start, end = _get_time_range(period)
+def get_report_snapshot(
+    period: str = "today",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, object]:
+    start, end, label = _get_time_range(period, start_date=start_date, end_date=end_date)
     conn = get_db()
 
     category_rows = conn.execute("""
@@ -120,8 +166,6 @@ def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     """, (start, end)).fetchone()["cnt"]
     conn.close()
 
-    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
-    label = period_labels.get(period, period)
     if total == 0:
         return {
             "period": period,
@@ -166,14 +210,20 @@ def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     }
 
 
-def generate_report(period: str = "today", fmt: str = "table", include_analysis: bool = False) -> str:
+def generate_report(
+    period: str = "today",
+    fmt: str = "table",
+    include_analysis: bool = False,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
     """生成报告
 
     Args:
         period: today / yesterday / week
         fmt: table / markdown
     """
-    snapshot = get_report_snapshot(period)
+    snapshot = get_report_snapshot(period, start_date=start_date, end_date=end_date)
     if snapshot["total_samples"] == 0:
         return f"[{period}] 暂无数据"
     categories = {item["category"]: item["seconds"] for item in snapshot["categories"]}
@@ -184,20 +234,18 @@ def generate_report(period: str = "today", fmt: str = "table", include_analysis:
     analysis = None
     if include_analysis:
         from workpulse.ai_analyzer import analyze_period
-        analysis = analyze_period(period)
+        analysis = analyze_period(period, start_date=start_date, end_date=end_date)
 
     if fmt == "html":
-        return _format_html(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_html(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
     if fmt == "markdown":
-        return _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_markdown(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
     else:
-        return _format_table(period, categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_table(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
 
 
-def _format_table(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+def _format_table(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
     lines = []
-    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
-    label = period_labels.get(period, period)
 
     lines.append(f"{'=' * 50}")
     lines.append(f"  WorkPulse {label}报告")
@@ -253,10 +301,8 @@ def _format_table(period, categories, active_total, idle_time, app_rows, title_r
     return "\n".join(lines)
 
 
-def _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+def _format_markdown(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
     lines = []
-    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
-    label = period_labels.get(period, period)
 
     lines.append(f"# WorkPulse {label}报告")
     lines.append("")
@@ -307,10 +353,7 @@ def _format_markdown(period, categories, active_total, idle_time, app_rows, titl
     return "\n".join(lines)
 
 
-def _format_html(period, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
-    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
-    label = period_labels.get(period, period)
-
+def _format_html(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
     category_rows = "".join(
         f"<tr><td>{html.escape(cat)}</td><td>{_format_duration(seconds)}</td><td>{(seconds / active_total * 100) if active_total else 0:.1f}%</td></tr>"
         for cat, seconds in sorted(categories.items(), key=lambda x: -x[1])

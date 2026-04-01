@@ -88,8 +88,8 @@ def _build_suggestions(snapshot: Dict[str, object]) -> List[str]:
     return suggestions
 
 
-def _count_context_switches(period: str) -> int:
-    snapshot = get_report_snapshot(period)
+def _count_context_switches(period: str, start_date: str = None, end_date: str = None) -> int:
+    snapshot = get_report_snapshot(period, start_date=start_date, end_date=end_date)
     start = snapshot["time_range"]["start"]
     end = snapshot["time_range"]["end"]
     conn = get_db()
@@ -114,13 +114,13 @@ def _count_context_switches(period: str) -> int:
     return switches
 
 
-def analyze_period(period: str = "today") -> Dict[str, object]:
-    snapshot = get_report_snapshot(period)
+def analyze_period(period: str = "today", start_date: str = None, end_date: str = None) -> Dict[str, object]:
+    snapshot = get_report_snapshot(period, start_date=start_date, end_date=end_date)
     title_counts = {}
     for item in snapshot["titles"]:
         title_counts[item["window_title"]] = title_counts.get(item["window_title"], 0) + item["samples"]
 
-    snapshot["context_switches"] = _count_context_switches(period)
+    snapshot["context_switches"] = _count_context_switches(period, start_date=start_date, end_date=end_date)
     snapshot["repeated_titles"] = [
         title for title, samples in title_counts.items() if samples >= 3 and title
     ]
@@ -142,8 +142,8 @@ def analyze_period(period: str = "today") -> Dict[str, object]:
     }
 
 
-def format_analysis(period: str = "today", fmt: str = "markdown") -> str:
-    analysis = analyze_period(period)
+def format_analysis(period: str = "today", fmt: str = "markdown", start_date: str = None, end_date: str = None) -> str:
+    analysis = analyze_period(period, start_date=start_date, end_date=end_date)
     if fmt == "json":
         return json.dumps(analysis, ensure_ascii=False, indent=2)
     return _format_markdown(analysis)

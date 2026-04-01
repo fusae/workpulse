@@ -6,8 +6,8 @@ from typing import Dict
 from workpulse.ai_analyzer import analyze_period
 
 
-def generate_brief(period: str = "today", fmt: str = "markdown") -> str:
-    analysis = analyze_period(period)
+def generate_brief(period: str = "today", fmt: str = "markdown", start_date: str = None, end_date: str = None) -> str:
+    analysis = analyze_period(period, start_date=start_date, end_date=end_date)
     if fmt == "json":
         return json.dumps(_brief_payload(analysis), ensure_ascii=False, indent=2)
     return _format_markdown(analysis)

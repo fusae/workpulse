@@ -45,6 +45,8 @@ def main():
         "--output",
         help="将输出写入指定文件路径",
     )
+    report_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
+    report_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
     # analyze
     analyze_parser = subparsers.add_parser("analyze", help="生成工作模式分析")
@@ -62,6 +64,8 @@ def main():
         choices=["markdown", "json"],
         help="输出格式 (默认: markdown)",
     )
+    analyze_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
+    analyze_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
     # brief
     brief_parser = subparsers.add_parser("brief", help="生成日报摘要")
@@ -79,6 +83,8 @@ def main():
         choices=["markdown", "json"],
         help="输出格式 (默认: markdown)",
     )
+    brief_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
+    brief_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
     # prune
     prune_parser = subparsers.add_parser("prune", help="清理旧数据")
@@ -138,6 +144,8 @@ def main():
             period=args.period,
             fmt=args.fmt,
             include_analysis=args.with_analysis,
+            start_date=args.from_date,
+            end_date=args.to_date,
         )
         if args.output:
             with open(args.output, "w", encoding="utf-8") as f:
@@ -147,11 +155,11 @@ def main():
 
     elif args.command == "analyze":
         from workpulse.ai_analyzer import format_analysis
-        print(format_analysis(period=args.period, fmt=args.fmt))
+        print(format_analysis(period=args.period, fmt=args.fmt, start_date=args.from_date, end_date=args.to_date))
 
     elif args.command == "brief":
         from workpulse.briefing import generate_brief
-        print(generate_brief(period=args.period, fmt=args.fmt))
+        print(generate_brief(period=args.period, fmt=args.fmt, start_date=args.from_date, end_date=args.to_date))
 
     elif args.command == "prune":
         from workpulse.tracker import prune_data

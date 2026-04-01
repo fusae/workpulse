@@ -87,6 +87,7 @@ workpulse report
 workpulse report yesterday
 workpulse report week --format markdown
 workpulse report week --format html --with-analysis --output report.html
+workpulse report --from-date 2026-03-01 --to-date 2026-03-07
 ```
 
 生成工作分析：
@@ -94,6 +95,7 @@ workpulse report week --format html --with-analysis --output report.html
 ```bash
 workpulse analyze
 workpulse analyze week --format json
+workpulse analyze --from-date 2026-03-01 --to-date 2026-03-07
 ```
 
 生成日报摘要：
@@ -101,6 +103,7 @@ workpulse analyze week --format json
 ```bash
 workpulse brief
 workpulse brief week --format json
+workpulse brief --from-date 2026-03-01 --to-date 2026-03-07
 ```
 
 停止追踪：

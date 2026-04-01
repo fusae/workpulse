@@ -12,10 +12,22 @@ class ReporterTests(unittest.TestCase):
     def test_today_uses_local_timezone_boundaries(self):
         now = datetime(2026, 4, 1, 9, 30, tzinfo=timezone(timedelta(hours=8)))
 
-        start, end = reporter._get_time_range("today", now=now)
+        start, end, _ = reporter._get_time_range("today", now=now)
 
         self.assertEqual(start, "2026-03-31T16:00:00+00:00")
         self.assertEqual(end, "2026-04-01T01:30:00+00:00")
+
+    def test_custom_date_range_uses_inclusive_end_day(self):
+        start, end, label = reporter._get_time_range(
+            "today",
+            now=datetime(2026, 4, 1, 9, 30, tzinfo=timezone(timedelta(hours=8))),
+            start_date="2026-03-30",
+            end_date="2026-04-01",
+        )
+
+        self.assertEqual(start, "2026-03-29T16:00:00+00:00")
+        self.assertEqual(end, "2026-04-01T16:00:00+00:00")
+        self.assertEqual(label, "2026-03-30 至 2026-04-01")
 
     def test_app_summary_marks_multi_category_apps(self):
         with tempfile.TemporaryDirectory() as tmpdir:
