@@ -68,7 +68,12 @@ class ReporterTests(unittest.TestCase):
                 return db
 
             with mock.patch.object(reporter, "get_db", side_effect=fake_get_db):
-                output = reporter.generate_report(period="today", fmt="markdown")
+                output = reporter.generate_report(
+                    period="today",
+                    fmt="markdown",
+                    start_date="2026-04-01",
+                    end_date="2026-04-01",
+                )
 
             self.assertIn("| Chrome | 1m | 多种(浏览) |", output)
             self.assertIn("| Code | 0m | 编码 |", output)
@@ -110,7 +115,12 @@ class ReporterTests(unittest.TestCase):
                 return db
 
             with mock.patch.object(reporter, "get_db", side_effect=fake_get_db):
-                output = reporter.generate_report(period="today", fmt="markdown")
+                output = reporter.generate_report(
+                    period="today",
+                    fmt="markdown",
+                    start_date="2026-04-01",
+                    end_date="2026-04-01",
+                )
 
             self.assertIn("- **活跃时间**: 0m", output)
             self.assertIn("| Code | 0m | 编码 |", output)

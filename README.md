@@ -51,6 +51,12 @@ pip install ".[windows]"
 .\scripts\build_windows.ps1 -Clean
 ```
 
+构建后会得到：
+
+- `dist\workpulse.exe`
+- `dist\artifacts\workpulse-windows-amd64.zip`
+- `dist\artifacts\workpulse-windows-amd64.sha256`
+
 ## 权限说明
 
 在 macOS 上，首次使用通常需要为终端或 Python 进程授予以下权限：

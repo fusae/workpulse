@@ -2,7 +2,7 @@
 
 ## Goal
 
-为 Windows 用户生成可直接分发的 `workpulse.exe`。
+为 Windows 用户生成可直接分发的单文件 `workpulse.exe`。
 
 ## Local Build
 
@@ -16,11 +16,14 @@
 
 1. 升级 `pip`
 2. 安装 `.[windows,build]`
-3. 使用 PyInstaller 按 [workpulse.spec](/Users/jamesyu/Projects/workpulse/workpulse.spec) 打包
+3. 使用 PyInstaller 按 [workpulse.spec](/Users/jamesyu/Projects/workpulse/workpulse.spec) 打包为单文件 exe
+4. 生成 zip 包和 SHA256 校验文件
 
 输出目录：
 
-- `dist\workpulse\`
+- `dist\workpulse.exe`
+- `dist\artifacts\workpulse-windows-amd64.zip`
+- `dist\artifacts\workpulse-windows-amd64.sha256`
 
 ## GitHub Actions
 
@@ -39,10 +42,10 @@
 2. 安装 `.[windows,build]`
 3. 运行测试
 4. 执行 PyInstaller 打包
-5. 上传构建产物
+5. 上传 exe、zip 和 SHA256
 
 ## Notes
 
 - 当前仍是控制台程序，不是图形界面安装器
-- 如果目标环境没有 Python，优先分发 PyInstaller 产物
+- 如果目标环境没有 Python，优先分发 `workpulse-windows-amd64.zip`
 - 如果要进一步降低使用门槛，下一步可以补 MSI / Inno Setup 安装包
