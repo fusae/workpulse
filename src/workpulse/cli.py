@@ -64,6 +64,13 @@ def main():
         choices=["markdown", "json"],
         help="输出格式 (默认: markdown)",
     )
+    analyze_parser.add_argument(
+        "--provider",
+        dest="provider",
+        default=None,
+        choices=["heuristic", "llm", "auto"],
+        help="分析提供方 (默认: 使用配置)",
+    )
     analyze_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
     analyze_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
 
@@ -82,6 +89,13 @@ def main():
         default="markdown",
         choices=["markdown", "json"],
         help="输出格式 (默认: markdown)",
+    )
+    brief_parser.add_argument(
+        "--provider",
+        dest="provider",
+        default=None,
+        choices=["heuristic", "llm", "auto"],
+        help="摘要提供方 (默认: 使用配置)",
     )
     brief_parser.add_argument("--from-date", dest="from_date", help="起始日期 (YYYY-MM-DD)")
     brief_parser.add_argument("--to-date", dest="to_date", help="结束日期 (YYYY-MM-DD)")
@@ -155,11 +169,27 @@ def main():
 
     elif args.command == "analyze":
         from workpulse.ai_analyzer import format_analysis
-        print(format_analysis(period=args.period, fmt=args.fmt, start_date=args.from_date, end_date=args.to_date))
+        print(
+            format_analysis(
+                period=args.period,
+                fmt=args.fmt,
+                start_date=args.from_date,
+                end_date=args.to_date,
+                provider=args.provider,
+            )
+        )
 
     elif args.command == "brief":
         from workpulse.briefing import generate_brief
-        print(generate_brief(period=args.period, fmt=args.fmt, start_date=args.from_date, end_date=args.to_date))
+        print(
+            generate_brief(
+                period=args.period,
+                fmt=args.fmt,
+                start_date=args.from_date,
+                end_date=args.to_date,
+                provider=args.provider,
+            )
+        )
 
     elif args.command == "prune":
         from workpulse.tracker import prune_data
@@ -182,6 +212,10 @@ def main():
         print(f"settings_path: {SETTINGS_PATH}")
         print(f"poll_interval_seconds: {settings.poll_interval_seconds}")
         print(f"archive_retention_days: {settings.archive_retention_days}")
+        print(f"analysis_provider: {settings.analysis_provider}")
+        print(f"llm_endpoint: {settings.llm_endpoint}")
+        print(f"llm_model: {settings.llm_model}")
+        print(f"llm_api_key_env: {settings.llm_api_key_env}")
 
     elif args.command == "doctor":
         from workpulse.doctor import run_doctor

@@ -1,9 +1,11 @@
 """AI 分析模块 - 基于活动摘要生成启发式工作分析。"""
 
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+from workpulse.llm_client import LLMError, analyze_with_llm, llm_is_configured
 from workpulse.reporter import get_report_snapshot
+from workpulse.settings import load_settings
 from workpulse.tracker import get_db, POLL_INTERVAL
 
 
@@ -114,7 +116,23 @@ def _count_context_switches(period: str, start_date: str = None, end_date: str =
     return switches
 
 
-def analyze_period(period: str = "today", start_date: str = None, end_date: str = None) -> Dict[str, object]:
+def _heuristic_analysis(snapshot: Dict[str, object]) -> Dict[str, object]:
+    findings = _build_findings(snapshot)
+    suggestions = _build_suggestions(snapshot)
+    return {
+        "summary": findings[0] if findings else "暂无足够数据。",
+        "findings": findings,
+        "suggestions": suggestions,
+        "source": "heuristic",
+    }
+
+
+def analyze_period(
+    period: str = "today",
+    start_date: str = None,
+    end_date: str = None,
+    provider: Optional[str] = None,
+) -> Dict[str, object]:
     snapshot = get_report_snapshot(period, start_date=start_date, end_date=end_date)
     title_counts = {}
     for item in snapshot["titles"]:
@@ -125,25 +143,58 @@ def analyze_period(period: str = "today", start_date: str = None, end_date: str 
         title for title, samples in title_counts.items() if samples >= 3 and title
     ]
 
-    findings = _build_findings(snapshot)
-    suggestions = _build_suggestions(snapshot)
+    settings = load_settings()
+    selected_provider = provider or settings.analysis_provider or "heuristic"
+    heuristic = _heuristic_analysis(snapshot)
+    llm_error = None
+
+    if selected_provider in {"llm", "auto", "openai_compatible"} and llm_is_configured():
+        try:
+            llm_result = analyze_with_llm(
+                snapshot,
+                {"findings": heuristic["findings"], "suggestions": heuristic["suggestions"]},
+            )
+            summary = llm_result["summary"] or heuristic["summary"]
+            findings = llm_result["findings"] or heuristic["findings"]
+            suggestions = llm_result["suggestions"] or heuristic["suggestions"]
+            source = "llm"
+        except LLMError as exc:
+            llm_error = str(exc)
+            summary = heuristic["summary"]
+            findings = heuristic["findings"]
+            suggestions = heuristic["suggestions"]
+            source = "heuristic"
+    else:
+        summary = heuristic["summary"]
+        findings = heuristic["findings"]
+        suggestions = heuristic["suggestions"]
+        source = "heuristic"
 
     return {
         "period": snapshot["period"],
         "label": snapshot["label"],
+        "source": source,
         "summary": {
             "active_time": _format_duration(snapshot["active_total"]),
             "idle_time": _format_duration(snapshot["idle_time"]),
             "context_switches": snapshot["context_switches"],
+            "overview": summary,
         },
         "findings": findings,
         "suggestions": suggestions,
         "snapshot": snapshot,
+        "llm_error": llm_error,
     }
 
 
-def format_analysis(period: str = "today", fmt: str = "markdown", start_date: str = None, end_date: str = None) -> str:
-    analysis = analyze_period(period, start_date=start_date, end_date=end_date)
+def format_analysis(
+    period: str = "today",
+    fmt: str = "markdown",
+    start_date: str = None,
+    end_date: str = None,
+    provider: Optional[str] = None,
+) -> str:
+    analysis = analyze_period(period, start_date=start_date, end_date=end_date, provider=provider)
     if fmt == "json":
         return json.dumps(analysis, ensure_ascii=False, indent=2)
     return _format_markdown(analysis)
@@ -153,13 +204,18 @@ def _format_markdown(analysis: Dict[str, object]) -> str:
     lines = [
         f"# WorkPulse {analysis['label']}分析",
         "",
+        f"- **分析来源**: {analysis['source']}",
         f"- **活跃时间**: {analysis['summary']['active_time']}",
         f"- **空闲时间**: {analysis['summary']['idle_time']}",
         f"- **上下文切换**: {analysis['summary']['context_switches']}",
+        f"- **概览**: {analysis['summary']['overview']}",
         "",
         "## 观察",
         "",
     ]
+
+    if analysis.get("llm_error"):
+        lines.extend([f"- **LLM 回退原因**: {analysis['llm_error']}", ""])
 
     for item in analysis["findings"]:
         lines.append(f"- {item}")

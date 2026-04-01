@@ -1,2 +1,7 @@
 poll_interval_seconds: 30
 archive_retention_days: 90
+analysis_provider: heuristic
+llm_endpoint: https://api.openai.com/v1/chat/completions
+llm_model: gpt-4o-mini
+llm_api_key_env: OPENAI_API_KEY
+llm_timeout_seconds: 30

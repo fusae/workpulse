@@ -85,6 +85,33 @@ class AnalyzerTests(unittest.TestCase):
             self.assertTrue(analysis["suggestions"])
             self.assertIn("跨多个分类", "".join(analysis["findings"]))
 
+    def test_analyze_period_uses_llm_when_requested(self):
+        fake_snapshot = {
+            "period": "today",
+            "label": "今日",
+            "time_range": {"start": "a", "end": "b"},
+            "total_samples": 1,
+            "active_total": 60,
+            "idle_time": 0,
+            "categories": [{"category": "编码", "seconds": 60, "pct": 100.0}],
+            "apps": [{"app_name": "Code", "samples": 2, "seconds": 60, "category": "编码"}],
+            "titles": [{"app_name": "Code", "window_title": "main.py", "samples": 2, "seconds": 60}],
+        }
+
+        with mock.patch.object(ai_analyzer, "get_report_snapshot", return_value=fake_snapshot):
+            with mock.patch.object(ai_analyzer, "_count_context_switches", return_value=0):
+                with mock.patch("workpulse.ai_analyzer.llm_is_configured", return_value=True):
+                    with mock.patch("workpulse.ai_analyzer.analyze_with_llm", return_value={
+                        "summary": "LLM 总结",
+                        "findings": ["LLM 观察"],
+                        "suggestions": ["LLM 建议"],
+                    }):
+                        analysis = ai_analyzer.analyze_period("today", provider="llm")
+
+        self.assertEqual(analysis["source"], "llm")
+        self.assertEqual(analysis["summary"]["overview"], "LLM 总结")
+        self.assertEqual(analysis["findings"], ["LLM 观察"])
+
 
 if __name__ == "__main__":
     unittest.main()

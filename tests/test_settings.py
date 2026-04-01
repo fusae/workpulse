@@ -17,6 +17,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(settings_path.exists())
             self.assertEqual(loaded.poll_interval_seconds, 30)
             self.assertEqual(loaded.archive_retention_days, 90)
+            self.assertEqual(loaded.analysis_provider, "heuristic")
 
     def test_load_settings_applies_bounds(self):
         with tempfile.TemporaryDirectory() as tmpdir:

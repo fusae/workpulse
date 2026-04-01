@@ -96,6 +96,7 @@ workpulse report --from-date 2026-03-01 --to-date 2026-03-07
 workpulse analyze
 workpulse analyze week --format json
 workpulse analyze --from-date 2026-03-01 --to-date 2026-03-07
+workpulse analyze --provider llm
 ```
 
 生成日报摘要：
@@ -104,6 +105,7 @@ workpulse analyze --from-date 2026-03-01 --to-date 2026-03-07
 workpulse brief
 workpulse brief week --format json
 workpulse brief --from-date 2026-03-01 --to-date 2026-03-07
+workpulse brief --provider llm
 ```
 
 停止追踪：
@@ -178,6 +180,25 @@ WorkPulse 默认把数据存放在用户目录下：
 - 配置文件：`~/.workpulse/settings.yaml`
 - 日志文件：`~/.workpulse/workpulse.log`
 - PID 文件：`~/.workpulse/workpulse.pid`
+
+## LLM 分析
+
+默认使用启发式分析。若要启用外部模型分析，可在环境变量中提供 API key，并将 `settings.yaml` 的 `analysis_provider` 设为 `llm` 或命令行传 `--provider llm`。
+
+默认兼容 OpenAI 风格接口，关键配置：
+
+- `analysis_provider`
+- `llm_endpoint`
+- `llm_model`
+- `llm_api_key_env`
+- `llm_timeout_seconds`
+
+例如：
+
+```bash
+export OPENAI_API_KEY=your_key
+workpulse analyze --provider llm
+```
 
 ## 分类规则
 
