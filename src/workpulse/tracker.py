@@ -163,6 +163,46 @@ def _wait_for_daemon_pid(timeout_seconds: float = 5.0) -> Optional[int]:
     return None
 
 
+def _process_exists(pid: int) -> bool:
+    """检查进程是否存在。"""
+    if sys.platform == "win32":
+        try:
+            import psutil
+        except ImportError:
+            logger.warning("Windows 环境缺少 psutil，无法可靠检查进程状态")
+            return False
+        return psutil.pid_exists(pid)
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _terminate_process(pid: int):
+    """终止指定进程。"""
+    if sys.platform == "win32":
+        try:
+            import psutil
+        except ImportError as exc:
+            raise RuntimeError("Windows 环境缺少 psutil，无法停止追踪器") from exc
+
+        try:
+            process = psutil.Process(pid)
+        except psutil.NoSuchProcess as exc:
+            raise ProcessLookupError(pid) from exc
+
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            process.kill()
+        return
+
+    os.kill(pid, signal.SIGTERM)
+
+
 def run_tracker():
     """运行追踪循环。"""
     _setup_logging()
@@ -234,7 +274,7 @@ def stop_daemon():
 
     pid = int(PID_PATH.read_text().strip())
     try:
-        os.kill(pid, signal.SIGTERM)
+        _terminate_process(pid)
         print(f"WorkPulse 已停止 (PID: {pid})")
     except ProcessLookupError:
         print("进程已不存在，清理 PID 文件")
@@ -247,13 +287,18 @@ def is_running() -> bool:
     """检查追踪器是否在运行"""
     if not PID_PATH.exists():
         return False
-    pid = int(PID_PATH.read_text().strip())
     try:
-        os.kill(pid, 0)  # 检查进程是否存在
-        return True
-    except (ProcessLookupError, PermissionError):
+        pid = int(PID_PATH.read_text().strip())
+    except ValueError:
         PID_PATH.unlink()
         return False
+
+    if _process_exists(pid):
+        return True
+
+    if PID_PATH.exists():
+        PID_PATH.unlink()
+    return False
 
 
 def show_status():
