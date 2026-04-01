@@ -180,6 +180,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 PYTHONPATH=src python3 -m workpulse --help
 ```
 
+设计文档：
+
+- [docs/design.md](/Users/jamesyu/Projects/workpulse/docs/design.md)
+
 ## 当前限制
 
 - 这是一个本地优先的轻量工具，暂不包含云同步
