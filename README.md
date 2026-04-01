@@ -96,6 +96,13 @@ workpulse analyze
 workpulse analyze week --format json
 ```
 
+生成日报摘要：
+
+```bash
+workpulse brief
+workpulse brief week --format json
+```
+
 停止追踪：
 
 ```bash

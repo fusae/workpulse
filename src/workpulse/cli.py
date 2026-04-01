@@ -63,6 +63,23 @@ def main():
         help="输出格式 (默认: markdown)",
     )
 
+    # brief
+    brief_parser = subparsers.add_parser("brief", help="生成日报摘要")
+    brief_parser.add_argument(
+        "period",
+        nargs="?",
+        default="today",
+        choices=["today", "yesterday", "week"],
+        help="摘要时间范围 (默认: today)",
+    )
+    brief_parser.add_argument(
+        "--format",
+        dest="fmt",
+        default="markdown",
+        choices=["markdown", "json"],
+        help="输出格式 (默认: markdown)",
+    )
+
     # prune
     prune_parser = subparsers.add_parser("prune", help="清理旧数据")
     prune_parser.add_argument(
@@ -121,6 +138,10 @@ def main():
     elif args.command == "analyze":
         from workpulse.ai_analyzer import format_analysis
         print(format_analysis(period=args.period, fmt=args.fmt))
+
+    elif args.command == "brief":
+        from workpulse.briefing import generate_brief
+        print(generate_brief(period=args.period, fmt=args.fmt))
 
     elif args.command == "prune":
         from workpulse.tracker import prune_data
