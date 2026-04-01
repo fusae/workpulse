@@ -1,12 +1,13 @@
 """核心追踪器 - 轮询前台窗口并记录到 SQLite"""
 
+import json
 import logging
 import os
 import signal
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,7 @@ PID_PATH = DATA_DIR / "workpulse.pid"
 LOG_PATH = DATA_DIR / "workpulse.log"
 
 POLL_INTERVAL = 30  # 秒
+ARCHIVE_RETENTION_DAYS = 90
 
 
 def _ensure_data_dir():
@@ -42,6 +44,36 @@ def _init_db(conn: sqlite3.Connection):
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_activities_timestamp
         ON activities(timestamp)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_archive (
+            id INTEGER PRIMARY KEY,
+            archived_at TEXT NOT NULL,
+            original_id INTEGER,
+            timestamp TEXT NOT NULL,
+            app_name TEXT NOT NULL,
+            window_title TEXT,
+            category TEXT,
+            is_idle BOOLEAN DEFAULT FALSE,
+            platform TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_activity_archive_timestamp
+        ON activity_archive(timestamp)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tracker_events (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            details TEXT,
+            platform TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_tracker_events_timestamp
+        ON tracker_events(timestamp)
     """)
     conn.commit()
 
@@ -72,6 +104,111 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_platform_name() -> str:
+    return "macos" if sys.platform == "darwin" else "windows"
+
+
+def record_event(event_type: str, details: Optional[dict] = None, conn: Optional[sqlite3.Connection] = None):
+    """记录追踪器事件。"""
+    owns_conn = conn is None
+    if conn is None:
+        conn = get_db()
+
+    payload = json.dumps(details, ensure_ascii=False) if details else None
+    conn.execute(
+        "INSERT INTO tracker_events (timestamp, event_type, details, platform) VALUES (?, ?, ?, ?)",
+        (_utc_now(), event_type, payload, _get_platform_name()),
+    )
+    conn.commit()
+
+    if owns_conn:
+        conn.close()
+
+
+def archive_old_activities(retention_days: int = ARCHIVE_RETENTION_DAYS, conn: Optional[sqlite3.Connection] = None) -> int:
+    """将保留期之外的数据转移到归档表。"""
+    owns_conn = conn is None
+    if conn is None:
+        conn = get_db()
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    rows = conn.execute(
+        """
+        SELECT id, timestamp, app_name, window_title, category, is_idle, platform
+        FROM activities
+        WHERE timestamp < ?
+        ORDER BY timestamp
+        """,
+        (cutoff,),
+    ).fetchall()
+
+    if not rows:
+        if owns_conn:
+            conn.close()
+        return 0
+
+    archived_at = _utc_now()
+    conn.executemany(
+        """
+        INSERT INTO activity_archive (
+            archived_at, original_id, timestamp, app_name, window_title, category, is_idle, platform
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                archived_at,
+                row["id"],
+                row["timestamp"],
+                row["app_name"],
+                row["window_title"],
+                row["category"],
+                row["is_idle"],
+                row["platform"],
+            )
+            for row in rows
+        ],
+    )
+    conn.executemany(
+        "DELETE FROM activities WHERE id = ?",
+        [(row["id"],) for row in rows],
+    )
+    conn.commit()
+
+    logger.info("已归档 %d 条活动记录（保留 %d 天）", len(rows), retention_days)
+    record_event(
+        "archive_completed",
+        {"archived_rows": len(rows), "retention_days": retention_days, "cutoff": cutoff},
+        conn=conn,
+    )
+
+    if owns_conn:
+        conn.close()
+    return len(rows)
+
+
+def _recover_previous_session():
+    """识别未清理的旧 PID，并记录恢复事件。"""
+    if not PID_PATH.exists():
+        return
+
+    try:
+        pid = int(PID_PATH.read_text().strip())
+    except ValueError:
+        PID_PATH.unlink()
+        return
+
+    if _process_exists(pid):
+        return
+
+    logger.warning("检测到上次运行未正常清理的 PID 文件: %s", pid)
+    record_event("recovered_stale_pid", {"stale_pid": pid})
+    PID_PATH.unlink()
+
+
 class Tracker:
     def __init__(self):
         self.platform = get_platform()
@@ -99,8 +236,8 @@ class Tracker:
             window_title = window.window_title
 
         category = self.classifier.classify(app_name, window_title)
-        timestamp = datetime.now(timezone.utc).isoformat()
-        platform_name = "macos" if sys.platform == "darwin" else "windows"
+        timestamp = _utc_now()
+        platform_name = _get_platform_name()
 
         row = (timestamp, app_name, window_title, category, is_idle, platform_name)
 
@@ -206,6 +343,8 @@ def _terminate_process(pid: int):
 def run_tracker():
     """运行追踪循环。"""
     _setup_logging()
+    _recover_previous_session()
+    archive_old_activities()
     tracker = Tracker()
     tracker.run()
 
@@ -323,11 +462,27 @@ def show_status():
 def prune_data(before_date: str):
     """清理指定日期之前的数据"""
     conn = get_db()
-    cursor = conn.execute(
+    active_cursor = conn.execute(
         "DELETE FROM activities WHERE timestamp < ?", (before_date,)
     )
+    archive_cursor = conn.execute(
+        "DELETE FROM activity_archive WHERE timestamp < ?", (before_date,)
+    )
+    events_cursor = conn.execute(
+        "DELETE FROM tracker_events WHERE timestamp < ?", (before_date,)
+    )
+    deleted = (
+        active_cursor.rowcount
+        + archive_cursor.rowcount
+        + events_cursor.rowcount
+    )
+    record_event(
+        "manual_prune",
+        {"before_date": before_date, "deleted_rows": deleted},
+        conn=conn,
+    )
     conn.commit()
-    print(f"已删除 {cursor.rowcount} 条记录（{before_date} 之前）")
+    print(f"已删除 {deleted} 条记录（{before_date} 之前）")
     conn.close()
 
 
