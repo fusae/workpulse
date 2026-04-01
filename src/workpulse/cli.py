@@ -71,6 +71,14 @@ def main():
         help="删除此日期之前的数据 (格式: 2026-01-01)",
     )
 
+    # autostart
+    autostart_parser = subparsers.add_parser("autostart", help="管理开机自启动")
+    autostart_parser.add_argument(
+        "action",
+        choices=["enable", "disable", "status"],
+        help="自启动操作",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -109,6 +117,16 @@ def main():
     elif args.command == "prune":
         from workpulse.tracker import prune_data
         prune_data(args.before)
+
+    elif args.command == "autostart":
+        from workpulse.autostart import disable_autostart, enable_autostart, show_autostart_status
+
+        if args.action == "enable":
+            enable_autostart()
+        elif args.action == "disable":
+            disable_autostart()
+        else:
+            show_autostart_status()
 
 
 if __name__ == "__main__":

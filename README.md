@@ -89,6 +89,14 @@ workpulse report week --format html --with-analysis --output report.html
 workpulse stop
 ```
 
+管理开机自启动：
+
+```bash
+workpulse autostart status
+workpulse autostart enable
+workpulse autostart disable
+```
+
 清理旧数据：
 
 ```bash
