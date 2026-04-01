@@ -77,17 +77,10 @@ def _get_app_rows(conn, start: str, end: str) -> List[Dict[str, object]]:
     return app_rows[:15]
 
 
-def generate_report(period: str = "today", fmt: str = "table") -> str:
-    """生成报告
-
-    Args:
-        period: today / yesterday / week
-        fmt: table / markdown
-    """
+def get_report_snapshot(period: str = "today") -> Dict[str, object]:
     start, end = _get_time_range(period)
     conn = get_db()
 
-    # 按分类汇总
     category_rows = conn.execute("""
         SELECT category, COUNT(*) as samples, is_idle
         FROM activities
@@ -96,10 +89,8 @@ def generate_report(period: str = "today", fmt: str = "table") -> str:
         ORDER BY samples DESC
     """, (start, end)).fetchall()
 
-    # 按应用汇总
     app_rows = _get_app_rows(conn, start, end)
 
-    # 按窗口标题汇总（top 10）
     title_rows = conn.execute("""
         SELECT app_name, window_title, COUNT(*) as samples
         FROM activities
@@ -110,18 +101,27 @@ def generate_report(period: str = "today", fmt: str = "table") -> str:
         LIMIT 10
     """, (start, end)).fetchall()
 
-    # 总记录数
     total = conn.execute("""
         SELECT COUNT(*) as cnt FROM activities
         WHERE timestamp >= ? AND timestamp < ?
     """, (start, end)).fetchone()["cnt"]
-
     conn.close()
 
+    period_labels = {"today": "今日", "yesterday": "昨日", "week": "本周"}
+    label = period_labels.get(period, period)
     if total == 0:
-        return f"[{period}] 暂无数据"
+        return {
+            "period": period,
+            "label": label,
+            "time_range": {"start": start, "end": end},
+            "total_samples": 0,
+            "active_total": 0,
+            "idle_time": 0,
+            "categories": [],
+            "apps": [],
+            "titles": [],
+        }
 
-    # 计算时间
     categories = {}
     idle_time = 0
     for row in category_rows:
@@ -133,6 +133,41 @@ def generate_report(period: str = "today", fmt: str = "table") -> str:
             categories[cat] = categories.get(cat, 0) + seconds
 
     active_total = sum(categories.values())
+    return {
+        "period": period,
+        "label": label,
+        "time_range": {"start": start, "end": end},
+        "total_samples": total,
+        "active_total": active_total,
+        "idle_time": idle_time,
+        "categories": [
+            {
+                "category": cat,
+                "seconds": seconds,
+                "pct": (seconds / active_total * 100) if active_total > 0 else 0,
+            }
+            for cat, seconds in sorted(categories.items(), key=lambda x: -x[1])
+        ],
+        "apps": app_rows,
+        "titles": [dict(row) for row in title_rows],
+    }
+
+
+def generate_report(period: str = "today", fmt: str = "table") -> str:
+    """生成报告
+
+    Args:
+        period: today / yesterday / week
+        fmt: table / markdown
+    """
+    snapshot = get_report_snapshot(period)
+    if snapshot["total_samples"] == 0:
+        return f"[{period}] 暂无数据"
+    categories = {item["category"]: item["seconds"] for item in snapshot["categories"]}
+    active_total = snapshot["active_total"]
+    idle_time = snapshot["idle_time"]
+    app_rows = snapshot["apps"]
+    title_rows = snapshot["titles"]
 
     if fmt == "markdown":
         return _format_markdown(period, categories, active_total, idle_time, app_rows, title_rows)
