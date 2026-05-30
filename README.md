@@ -5,6 +5,11 @@
 ## 功能
 
 - 每 30 秒采样一次当前前台应用和窗口标题
+- 周期性截图并用 OCR 提取可见文本，用于生成屏幕理解线索
+- 读取浏览器当前 URL，辅助判断网页活动
+- 可配置项目目录，记录 Git 分支、dirty 状态和近期文件改动线索
+- 从近期文本文件改动和终端窗口标题提取产出/终端线索
+- 按项目和意图归类活动，生成带事实线索的复盘报告
 - 记录用户空闲状态并区分活跃时间 / 空闲时间
 - 基于 YAML 规则将活动分类为编码、文档、沟通、设计、浏览、娱乐等
 - 使用本地 SQLite 存储数据
@@ -66,6 +71,8 @@ pip install ".[windows]"
 
 否则可能无法读取前台窗口标题或获取准确的活动信息。
 
+WorkPulse 不记录原始键盘按键。默认会截图后做 OCR，但不保留原始截图；如需留存截图，可在 `~/.workpulse/settings.yaml` 设置 `keep_raw_screenshots: true`。
+
 ## 使用方式
 
 查看帮助：
@@ -86,6 +93,14 @@ workpulse start
 workpulse status
 ```
 
+暂停 / 恢复采集：
+
+```bash
+workpulse pause 30
+workpulse pause
+workpulse resume
+```
+
 生成报告：
 
 ```bash
@@ -104,6 +119,33 @@ workpulse analyze week --format json
 workpulse analyze --from-date 2026-03-01 --to-date 2026-03-07
 workpulse analyze --provider llm
 ```
+
+## 屏幕理解与隐私
+
+相关配置在 `~/.workpulse/settings.yaml`：
+
+```yaml
+screen_capture_enabled: true
+screen_capture_interval_seconds: 60
+screen_ocr_enabled: true
+keep_raw_screenshots: false
+screenshot_retention_days: 7
+sensitive_apps:
+  - 1Password
+  - Keychain Access
+sensitive_title_keywords:
+  - password
+  - 密码
+  - token
+sensitive_url_keywords:
+  - /login
+  - banking
+project_roots:
+  - ~/Projects/workpulse
+project_scan_recent_seconds: 300
+```
+
+`sensitive_*` 命中时会跳过截图和 OCR；`project_roots` 用于补充文件/Git 产出证据。
 
 生成日报摘要：
 
@@ -253,6 +295,7 @@ rules:
 - 分类统计
 - 应用统计
 - 活动详情 Top 10
+- URL、项目、意图、文本/终端和屏幕理解线索
 
 ## 开发
 

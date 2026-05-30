@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from workpulse.ai_analyzer import analyze_period
 from workpulse.briefing import _brief_payload
+from workpulse.intent import intent_label
 from workpulse.llm_client import LLMError, llm_is_configured, request_json
 from workpulse.settings import load_settings
 
@@ -61,6 +62,18 @@ def _heuristic_daily_report(analysis: Dict[str, object], brief: Dict[str, object
     outputs = []
     for item in snapshot["titles"][:5]:
         outputs.append(f"{item['app_name']} / {item['window_title']}")
+    for item in snapshot.get("urls", [])[:3]:
+        outputs.append(f"{item['app_name']} URL: {item['browser_url']}")
+    for item in snapshot.get("projects", [])[:3]:
+        outputs.append(f"项目线索: {item['project_name']}")
+    for item in snapshot.get("intents", [])[:3]:
+        outputs.append(f"意图线索: {intent_label(item['intent'])}")
+    for item in snapshot.get("activity_evidence", [])[:3]:
+        evidence = item.get("text_evidence") or item.get("terminal_evidence")
+        if evidence:
+            outputs.append(f"文本/终端线索: {evidence}")
+    for item in snapshot.get("screen_evidence", [])[:3]:
+        outputs.append(f"屏幕线索: {item['screen_summary']}")
 
     blockers = []
     if snapshot["idle_time"] > snapshot["active_total"] * 0.35 and snapshot["idle_time"] >= 1800:

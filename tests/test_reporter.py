@@ -125,6 +125,50 @@ class ReporterTests(unittest.TestCase):
             self.assertIn("- **活跃时间**: 0m", output)
             self.assertIn("| Code | 0m | 编码 |", output)
 
+    def test_report_includes_intent_summary_when_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "activity.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            conn.execute("""
+                CREATE TABLE activities (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT NOT NULL,
+                    app_name TEXT NOT NULL,
+                    window_title TEXT,
+                    category TEXT,
+                    is_idle BOOLEAN DEFAULT FALSE,
+                    platform TEXT NOT NULL,
+                    sample_seconds INTEGER NOT NULL DEFAULT 30,
+                    intent TEXT
+                )
+            """)
+            conn.execute(
+                """
+                INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds, intent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("2026-03-31T16:05:00+00:00", "Code", "main.py", "编码", 0, "macos", 60, "coding"),
+            )
+            conn.commit()
+            conn.close()
+
+            def fake_get_db():
+                db = sqlite3.connect(str(db_path))
+                db.row_factory = sqlite3.Row
+                return db
+
+            with mock.patch.object(reporter, "get_db", side_effect=fake_get_db):
+                output = reporter.generate_report(
+                    period="today",
+                    fmt="markdown",
+                    start_date="2026-04-01",
+                    end_date="2026-04-01",
+                )
+
+            self.assertIn("## 意图归类", output)
+            self.assertIn("- 编码开发: 1m", output)
+
 
 if __name__ == "__main__":
     unittest.main()

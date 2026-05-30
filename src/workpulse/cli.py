@@ -17,6 +17,13 @@ def main():
     # stop
     subparsers.add_parser("stop", help="停止后台追踪")
 
+    # pause
+    pause_parser = subparsers.add_parser("pause", help="暂停采集")
+    pause_parser.add_argument("minutes", nargs="?", type=int, help="暂停分钟数；留空则手动恢复")
+
+    # resume
+    subparsers.add_parser("resume", help="恢复采集")
+
     # status
     subparsers.add_parser("status", help="查看运行状态")
 
@@ -202,6 +209,14 @@ def main():
         from workpulse.tracker import stop_daemon
         stop_daemon()
 
+    elif args.command == "pause":
+        from workpulse.tracker import pause_tracking
+        pause_tracking(args.minutes)
+
+    elif args.command == "resume":
+        from workpulse.tracker import resume_tracking
+        resume_tracking()
+
     elif args.command == "status":
         from workpulse.tracker import show_status
         show_status()
@@ -270,6 +285,14 @@ def main():
         print(f"llm_endpoint: {settings.llm_endpoint}")
         print(f"llm_model: {settings.llm_model}")
         print(f"llm_api_key_env: {settings.llm_api_key_env}")
+        print(f"screen_capture_enabled: {settings.screen_capture_enabled}")
+        print(f"screen_capture_interval_seconds: {settings.screen_capture_interval_seconds}")
+        print(f"screen_ocr_enabled: {settings.screen_ocr_enabled}")
+        print(f"keep_raw_screenshots: {settings.keep_raw_screenshots}")
+        print(f"screenshot_retention_days: {settings.screenshot_retention_days}")
+        print(f"sensitive_apps: {settings.sensitive_apps}")
+        print(f"project_roots: {settings.project_roots}")
+        print(f"project_scan_recent_seconds: {settings.project_scan_recent_seconds}")
 
     elif args.command == "doctor":
         from workpulse.doctor import run_doctor

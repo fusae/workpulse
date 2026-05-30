@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -24,6 +25,7 @@ def collect_diagnostics() -> Dict[str, object]:
     checks.append(_check_python())
     checks.append(_check_platform())
     checks.extend(_check_dependencies())
+    checks.extend(_check_screen_tools())
     checks.append(_check_data_dir())
     checks.append(_check_settings())
     checks.append(_check_rules())
@@ -66,6 +68,27 @@ def _check_dependencies() -> List[Dict[str, str]]:
             checks.append({"name": f"dep:{module_name}", "status": "ok", "message": "已安装"})
         except Exception as exc:
             checks.append({"name": f"dep:{module_name}", "status": "warn", "message": f"不可用: {exc}"})
+    return checks
+
+
+def _check_screen_tools() -> List[Dict[str, str]]:
+    checks = []
+    if sys.platform == "darwin":
+        checks.append({
+            "name": "tool:screencapture",
+            "status": "ok" if shutil.which("screencapture") else "warn",
+            "message": "macOS 截图工具" if shutil.which("screencapture") else "未找到 screencapture",
+        })
+        checks.append({
+            "name": "tool:osascript",
+            "status": "ok" if shutil.which("osascript") else "warn",
+            "message": "浏览器 URL 读取工具" if shutil.which("osascript") else "未找到 osascript",
+        })
+        checks.append({
+            "name": "tool:tesseract",
+            "status": "ok" if shutil.which("tesseract") else "warn",
+            "message": "OCR 可用" if shutil.which("tesseract") else "未安装 tesseract，截图仍会记录摘要但没有 OCR 文本",
+        })
     return checks
 
 

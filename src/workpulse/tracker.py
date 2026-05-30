@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Optional
 
 from workpulse.classifier import Classifier
+from workpulse.context import collect_project_context, dumps_context, summarize_text_outputs, terminal_evidence
+from workpulse.intent import infer_intent
 from workpulse.platform.base import get_platform
+from workpulse.screen import ScreenSample, capture_screen_sample
 from workpulse.settings import DEFAULT_POLL_INTERVAL, load_settings
 
 logger = logging.getLogger("workpulse")
@@ -21,6 +24,7 @@ DATA_DIR = Path.home() / ".workpulse"
 DB_PATH = DATA_DIR / "activity.db"
 PID_PATH = DATA_DIR / "workpulse.pid"
 LOG_PATH = DATA_DIR / "workpulse.log"
+PAUSE_PATH = DATA_DIR / "pause.json"
 
 POLL_INTERVAL = DEFAULT_POLL_INTERVAL  # 历史兼容默认值
 
@@ -48,10 +52,36 @@ def _init_db(conn: sqlite3.Connection):
             category TEXT,
             is_idle BOOLEAN DEFAULT FALSE,
             platform TEXT NOT NULL,
-            sample_seconds INTEGER NOT NULL DEFAULT 30
+            sample_seconds INTEGER NOT NULL DEFAULT 30,
+            browser_url TEXT,
+            screenshot_path TEXT,
+            screenshot_hash TEXT,
+            ocr_text TEXT,
+            ocr_status TEXT,
+            screen_summary TEXT,
+            screen_skipped_reason TEXT,
+            project_name TEXT,
+            project_evidence TEXT,
+            intent TEXT,
+            intent_evidence TEXT,
+            text_evidence TEXT,
+            terminal_evidence TEXT
         )
     """)
     _ensure_column(conn, "activities", "sample_seconds", "sample_seconds INTEGER NOT NULL DEFAULT 30")
+    _ensure_column(conn, "activities", "browser_url", "browser_url TEXT")
+    _ensure_column(conn, "activities", "screenshot_path", "screenshot_path TEXT")
+    _ensure_column(conn, "activities", "screenshot_hash", "screenshot_hash TEXT")
+    _ensure_column(conn, "activities", "ocr_text", "ocr_text TEXT")
+    _ensure_column(conn, "activities", "ocr_status", "ocr_status TEXT")
+    _ensure_column(conn, "activities", "screen_summary", "screen_summary TEXT")
+    _ensure_column(conn, "activities", "screen_skipped_reason", "screen_skipped_reason TEXT")
+    _ensure_column(conn, "activities", "project_name", "project_name TEXT")
+    _ensure_column(conn, "activities", "project_evidence", "project_evidence TEXT")
+    _ensure_column(conn, "activities", "intent", "intent TEXT")
+    _ensure_column(conn, "activities", "intent_evidence", "intent_evidence TEXT")
+    _ensure_column(conn, "activities", "text_evidence", "text_evidence TEXT")
+    _ensure_column(conn, "activities", "terminal_evidence", "terminal_evidence TEXT")
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_activities_timestamp
         ON activities(timestamp)
@@ -67,10 +97,36 @@ def _init_db(conn: sqlite3.Connection):
             category TEXT,
             is_idle BOOLEAN DEFAULT FALSE,
             platform TEXT NOT NULL,
-            sample_seconds INTEGER NOT NULL DEFAULT 30
+            sample_seconds INTEGER NOT NULL DEFAULT 30,
+            browser_url TEXT,
+            screenshot_path TEXT,
+            screenshot_hash TEXT,
+            ocr_text TEXT,
+            ocr_status TEXT,
+            screen_summary TEXT,
+            screen_skipped_reason TEXT,
+            project_name TEXT,
+            project_evidence TEXT,
+            intent TEXT,
+            intent_evidence TEXT,
+            text_evidence TEXT,
+            terminal_evidence TEXT
         )
     """)
     _ensure_column(conn, "activity_archive", "sample_seconds", "sample_seconds INTEGER NOT NULL DEFAULT 30")
+    _ensure_column(conn, "activity_archive", "browser_url", "browser_url TEXT")
+    _ensure_column(conn, "activity_archive", "screenshot_path", "screenshot_path TEXT")
+    _ensure_column(conn, "activity_archive", "screenshot_hash", "screenshot_hash TEXT")
+    _ensure_column(conn, "activity_archive", "ocr_text", "ocr_text TEXT")
+    _ensure_column(conn, "activity_archive", "ocr_status", "ocr_status TEXT")
+    _ensure_column(conn, "activity_archive", "screen_summary", "screen_summary TEXT")
+    _ensure_column(conn, "activity_archive", "screen_skipped_reason", "screen_skipped_reason TEXT")
+    _ensure_column(conn, "activity_archive", "project_name", "project_name TEXT")
+    _ensure_column(conn, "activity_archive", "project_evidence", "project_evidence TEXT")
+    _ensure_column(conn, "activity_archive", "intent", "intent TEXT")
+    _ensure_column(conn, "activity_archive", "intent_evidence", "intent_evidence TEXT")
+    _ensure_column(conn, "activity_archive", "text_evidence", "text_evidence TEXT")
+    _ensure_column(conn, "activity_archive", "terminal_evidence", "terminal_evidence TEXT")
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_activity_archive_timestamp
         ON activity_archive(timestamp)
@@ -142,6 +198,71 @@ def record_event(event_type: str, details: Optional[dict] = None, conn: Optional
         conn.close()
 
 
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def get_pause_status(now: Optional[datetime] = None) -> dict:
+    """Return pause status and clear expired pause state."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if not PAUSE_PATH.exists():
+        return {"paused": False, "until": None}
+
+    try:
+        status = json.loads(PAUSE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        PAUSE_PATH.unlink(missing_ok=True)
+        return {"paused": False, "until": None}
+
+    until = _parse_iso_datetime(status.get("until"))
+    if until is not None and until <= now:
+        PAUSE_PATH.unlink(missing_ok=True)
+        return {"paused": False, "until": None}
+
+    return {
+        "paused": bool(status.get("paused", True)),
+        "until": until.isoformat() if until else None,
+        "reason": status.get("reason", "manual"),
+    }
+
+
+def pause_tracking(minutes: Optional[int] = None):
+    _ensure_data_dir()
+    until = None
+    if minutes is not None:
+        if minutes < 1:
+            minutes = 1
+        until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+    payload = {
+        "paused": True,
+        "until": until.isoformat() if until else None,
+        "reason": "manual",
+    }
+    PAUSE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    record_event("paused", {"minutes": minutes, "until": payload["until"]})
+    if until:
+        print(f"WorkPulse 已暂停至 {until.isoformat()}")
+    else:
+        print("WorkPulse 已暂停")
+
+
+def resume_tracking():
+    existed = PAUSE_PATH.exists()
+    PAUSE_PATH.unlink(missing_ok=True)
+    record_event("resumed", {"was_paused": existed})
+    print("WorkPulse 已恢复")
+
+
 def archive_old_activities(retention_days: Optional[int] = None, conn: Optional[sqlite3.Connection] = None) -> int:
     """将保留期之外的数据转移到归档表。"""
     if retention_days is None:
@@ -153,7 +274,9 @@ def archive_old_activities(retention_days: Optional[int] = None, conn: Optional[
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     rows = conn.execute(
         """
-        SELECT id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds
+        SELECT id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds,
+               browser_url, screenshot_path, screenshot_hash, ocr_text, ocr_status, screen_summary, screen_skipped_reason,
+               project_name, project_evidence, intent, intent_evidence, text_evidence, terminal_evidence
         FROM activities
         WHERE timestamp < ?
         ORDER BY timestamp
@@ -170,8 +293,10 @@ def archive_old_activities(retention_days: Optional[int] = None, conn: Optional[
     conn.executemany(
         """
         INSERT INTO activity_archive (
-            archived_at, original_id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            archived_at, original_id, timestamp, app_name, window_title, category, is_idle, platform, sample_seconds,
+            browser_url, screenshot_path, screenshot_hash, ocr_text, ocr_status, screen_summary, screen_skipped_reason,
+            project_name, project_evidence, intent, intent_evidence, text_evidence, terminal_evidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -184,6 +309,19 @@ def archive_old_activities(retention_days: Optional[int] = None, conn: Optional[
                 row["is_idle"],
                 row["platform"],
                 row["sample_seconds"],
+                row["browser_url"],
+                row["screenshot_path"],
+                row["screenshot_hash"],
+                row["ocr_text"],
+                row["ocr_status"],
+                row["screen_summary"],
+                row["screen_skipped_reason"],
+                row["project_name"],
+                row["project_evidence"],
+                row["intent"],
+                row["intent_evidence"],
+                row["text_evidence"],
+                row["terminal_evidence"],
             )
             for row in rows
         ],
@@ -233,6 +371,7 @@ class Tracker:
         self.running = False
         self._conn: Optional[sqlite3.Connection] = None
         self._buffer: list = []  # 写入失败时的缓冲队列
+        self._last_screen_capture_at = 0.0
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -240,6 +379,9 @@ class Tracker:
         return self._conn
 
     def _record(self):
+        if get_pause_status()["paused"]:
+            return
+
         window = self.platform.get_active_window()
         idle_seconds = self.platform.get_idle_seconds()
         idle_threshold = self.classifier.idle_threshold_minutes * 60
@@ -255,6 +397,17 @@ class Tracker:
         category = self.classifier.classify(app_name, window_title)
         timestamp = _utc_now()
         platform_name = _get_platform_name()
+        screen_sample = self._screen_sample(app_name, window_title)
+        project_context = collect_project_context(self.settings)
+        text_evidence = summarize_text_outputs(project_context)
+        terminal_summary = terminal_evidence(app_name, window_title)
+        intent, intent_evidence = infer_intent(
+            app_name,
+            window_title,
+            screen_sample.url,
+            screen_sample.ocr_text,
+            project_context["primary_project"],
+        )
 
         row = (
             timestamp,
@@ -264,6 +417,19 @@ class Tracker:
             is_idle,
             platform_name,
             self.settings.poll_interval_seconds,
+            screen_sample.url,
+            screen_sample.screenshot_path,
+            screen_sample.screenshot_hash,
+            screen_sample.ocr_text,
+            screen_sample.ocr_status,
+            screen_sample.screen_summary,
+            screen_sample.skipped_reason,
+            project_context["primary_project"],
+            dumps_context(project_context),
+            intent,
+            intent_evidence,
+            text_evidence,
+            terminal_summary,
         )
 
         try:
@@ -271,16 +437,26 @@ class Tracker:
             # 先写入缓冲区中的数据
             if self._buffer:
                 conn.executemany(
-                    "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    """
+                    INSERT INTO activities (
+                        timestamp, app_name, window_title, category, is_idle, platform, sample_seconds,
+                        browser_url, screenshot_path, screenshot_hash, ocr_text, ocr_status, screen_summary, screen_skipped_reason,
+                        project_name, project_evidence, intent, intent_evidence, text_evidence, terminal_evidence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
                     self._buffer,
                 )
                 logger.info("缓冲区 %d 条记录已写入", len(self._buffer))
                 self._buffer.clear()
 
             conn.execute(
-                "INSERT INTO activities (timestamp, app_name, window_title, category, is_idle, platform, sample_seconds) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO activities (
+                    timestamp, app_name, window_title, category, is_idle, platform, sample_seconds,
+                    browser_url, screenshot_path, screenshot_hash, ocr_text, ocr_status, screen_summary, screen_skipped_reason,
+                    project_name, project_evidence, intent, intent_evidence, text_evidence, terminal_evidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 row,
             )
             conn.commit()
@@ -288,6 +464,17 @@ class Tracker:
         except sqlite3.Error as e:
             logger.warning("SQLite 写入失败，缓存到内存: %s", e)
             self._buffer.append(row)
+
+    def _screen_sample(self, app_name: str, window_title: str) -> ScreenSample:
+        now = time.time()
+        due = (
+            now - self._last_screen_capture_at
+            >= self.settings.screen_capture_interval_seconds
+        )
+        sample = capture_screen_sample(app_name, window_title, self.settings, force=due)
+        if sample.screenshot_hash or sample.skipped_reason:
+            self._last_screen_capture_at = now
+        return sample
 
     def run(self):
         _setup_logging()
@@ -480,8 +667,14 @@ def show_status():
             print(f"  记录数: {row['cnt']}")
             print(f"  首条记录: {row['first']}")
             print(f"  最新记录: {row['last']}")
+        pause = get_pause_status()
+        if pause["paused"]:
+            print(f"  暂停中: {pause['until'] or '手动恢复前'}")
     else:
         print("WorkPulse 未在运行")
+        pause = get_pause_status()
+        if pause["paused"]:
+            print(f"  暂停中: {pause['until'] or '手动恢复前'}")
 
 
 def prune_data(before_date: str):

@@ -4,6 +4,7 @@ import json
 from typing import Dict, List, Optional
 
 from workpulse.llm_client import LLMError, analyze_with_llm, llm_is_configured
+from workpulse.intent import intent_label
 from workpulse.reporter import get_report_snapshot
 from workpulse.settings import load_settings
 from workpulse.tracker import get_db, POLL_INTERVAL
@@ -24,6 +25,7 @@ def _build_findings(snapshot: Dict[str, object]) -> List[str]:
     categories = snapshot["categories"]
     apps = snapshot["apps"]
     context_switches = snapshot["context_switches"]
+    intents = snapshot.get("intents", [])
 
     if not active_total and not idle_time:
         return ["暂无足够数据，无法分析工作模式。"]
@@ -59,6 +61,12 @@ def _build_findings(snapshot: Dict[str, object]) -> List[str]:
             f"有 {len(multi_category_apps)} 个应用跨多个分类，说明仅按应用名看工作内容会失真。"
         )
 
+    if intents:
+        top_intent = intents[0]
+        findings.append(
+            f"意图归类显示主要活动为“{intent_label(top_intent['intent'])}”，约 {_format_duration(top_intent['seconds'])}。"
+        )
+
     return findings
 
 
@@ -69,6 +77,8 @@ def _build_suggestions(snapshot: Dict[str, object]) -> List[str]:
     titles = snapshot["titles"]
     context_switches = snapshot["context_switches"]
     repeated_titles = snapshot["repeated_titles"]
+    screen_evidence = snapshot.get("screen_evidence", [])
+    intents = snapshot.get("intents", [])
 
     if context_switches >= 20:
         suggestions.append("将即时沟通集中到固定时段处理，减少频繁切换窗口。")
@@ -83,6 +93,12 @@ def _build_suggestions(snapshot: Dict[str, object]) -> List[str]:
 
     if repeated_titles:
         suggestions.append("检测到重复高频窗口，可考虑把这类固定流程沉淀为模板或自动化脚本。")
+
+    if not screen_evidence:
+        suggestions.append("缺少屏幕理解线索时，复盘只能依赖窗口标题和应用名，建议确认屏幕录制权限和 OCR 工具。")
+
+    if not intents:
+        suggestions.append("缺少意图归类线索时，建议确认采集器已升级并持续运行。")
 
     if not suggestions and titles:
         suggestions.append("当前活动结构较稳定，下一步更值得投入的是补充更细粒度的分类规则。")

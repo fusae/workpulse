@@ -5,3 +5,28 @@ llm_endpoint: https://api.openai.com/v1/chat/completions
 llm_model: gpt-4o-mini
 llm_api_key_env: OPENAI_API_KEY
 llm_timeout_seconds: 30
+screen_capture_enabled: true
+screen_capture_interval_seconds: 60
+screen_ocr_enabled: true
+keep_raw_screenshots: false
+screenshot_retention_days: 7
+sensitive_apps:
+  - 1Password
+  - Keychain Access
+  - 钥匙串访问
+sensitive_title_keywords:
+  - password
+  - 密码
+  - 验证码
+  - token
+  - secret
+  - private key
+sensitive_url_keywords:
+  - /login
+  - password
+  - bank
+  - banking
+  - pay
+  - checkout
+project_roots: []
+project_scan_recent_seconds: 300

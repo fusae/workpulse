@@ -4,6 +4,7 @@ import html
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
+from workpulse.intent import intent_label
 from workpulse.tracker import get_db, POLL_INTERVAL
 
 
@@ -132,6 +133,10 @@ def _get_app_rows(conn, start: str, end: str) -> List[Dict[str, object]]:
     return app_rows[:15]
 
 
+def _has_column(conn, table: str, column: str) -> bool:
+    return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})").fetchall())
+
+
 def get_report_snapshot(
     period: str = "today",
     start_date: Optional[str] = None,
@@ -160,6 +165,75 @@ def get_report_snapshot(
         LIMIT 10
     """, (POLL_INTERVAL, start, end)).fetchall()
 
+    if _has_column(conn, "activities", "browser_url"):
+        url_rows = conn.execute("""
+            SELECT app_name, browser_url, COUNT(*) as samples, SUM(COALESCE(sample_seconds, ?)) as seconds
+            FROM activities
+            WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
+              AND COALESCE(browser_url, '') != ''
+            GROUP BY app_name, browser_url
+            ORDER BY seconds DESC
+            LIMIT 10
+        """, (POLL_INTERVAL, start, end)).fetchall()
+    else:
+        url_rows = []
+
+    if _has_column(conn, "activities", "screen_summary"):
+        evidence_rows = conn.execute("""
+            SELECT timestamp, app_name, window_title, browser_url, ocr_status, screen_summary, screen_skipped_reason
+            FROM activities
+            WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
+              AND COALESCE(screen_summary, '') != ''
+            ORDER BY timestamp DESC
+            LIMIT 20
+        """, (start, end)).fetchall()
+    else:
+        evidence_rows = []
+
+    if _has_column(conn, "activities", "project_name"):
+        project_rows = conn.execute("""
+            SELECT project_name, COUNT(*) as samples, SUM(COALESCE(sample_seconds, ?)) as seconds
+            FROM activities
+            WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
+              AND COALESCE(project_name, '') != ''
+            GROUP BY project_name
+            ORDER BY seconds DESC
+            LIMIT 10
+        """, (POLL_INTERVAL, start, end)).fetchall()
+    else:
+        project_rows = []
+
+    if _has_column(conn, "activities", "intent"):
+        intent_rows = conn.execute("""
+            SELECT COALESCE(intent, 'unknown') as intent, COUNT(*) as samples, SUM(COALESCE(sample_seconds, ?)) as seconds
+            FROM activities
+            WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
+            GROUP BY COALESCE(intent, 'unknown')
+            ORDER BY seconds DESC
+            LIMIT 10
+        """, (POLL_INTERVAL, start, end)).fetchall()
+    else:
+        intent_rows = []
+
+    evidence_columns = []
+    if _has_column(conn, "activities", "text_evidence"):
+        evidence_columns.append("text_evidence")
+    if _has_column(conn, "activities", "terminal_evidence"):
+        evidence_columns.append("terminal_evidence")
+    if evidence_columns:
+        select_columns = ", ".join(evidence_columns)
+        where_clause = " OR ".join(f"COALESCE({column}, '') != ''" for column in evidence_columns)
+        activity_evidence_rows = conn.execute(f"""
+            SELECT timestamp, app_name, window_title, {select_columns}
+            FROM activities
+            WHERE timestamp >= ? AND timestamp < ? AND is_idle = 0
+              AND ({where_clause})
+            ORDER BY timestamp DESC
+            LIMIT 20
+        """, (start, end)).fetchall()
+    else:
+        activity_evidence_rows = []
+
     total = conn.execute("""
         SELECT COUNT(*) as cnt FROM activities
         WHERE timestamp >= ? AND timestamp < ?
@@ -177,6 +251,11 @@ def get_report_snapshot(
             "categories": [],
             "apps": [],
             "titles": [],
+            "urls": [],
+            "screen_evidence": [],
+            "projects": [],
+            "intents": [],
+            "activity_evidence": [],
         }
 
     categories = {}
@@ -207,6 +286,11 @@ def get_report_snapshot(
         ],
         "apps": app_rows,
         "titles": [dict(row) for row in title_rows],
+        "urls": [dict(row) for row in url_rows],
+        "screen_evidence": [dict(row) for row in evidence_rows],
+        "projects": [dict(row) for row in project_rows],
+        "intents": [dict(row) for row in intent_rows],
+        "activity_evidence": [dict(row) for row in activity_evidence_rows],
     }
 
 
@@ -231,20 +315,25 @@ def generate_report(
     idle_time = snapshot["idle_time"]
     app_rows = snapshot["apps"]
     title_rows = snapshot["titles"]
+    url_rows = snapshot.get("urls", [])
+    evidence_rows = snapshot.get("screen_evidence", [])
+    project_rows = snapshot.get("projects", [])
+    intent_rows = snapshot.get("intents", [])
+    activity_evidence_rows = snapshot.get("activity_evidence", [])
     analysis = None
     if include_analysis:
         from workpulse.ai_analyzer import analyze_period
         analysis = analyze_period(period, start_date=start_date, end_date=end_date)
 
     if fmt == "html":
-        return _format_html(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_html(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis, url_rows, evidence_rows, project_rows, intent_rows, activity_evidence_rows)
     if fmt == "markdown":
-        return _format_markdown(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_markdown(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis, url_rows, evidence_rows, project_rows, intent_rows, activity_evidence_rows)
     else:
-        return _format_table(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis)
+        return _format_table(snapshot["label"], categories, active_total, idle_time, app_rows, title_rows, analysis, url_rows, evidence_rows, project_rows, intent_rows, activity_evidence_rows)
 
 
-def _format_table(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+def _format_table(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None, url_rows=None, evidence_rows=None, project_rows=None, intent_rows=None, activity_evidence_rows=None) -> str:
     lines = []
 
     lines.append(f"{'=' * 50}")
@@ -288,6 +377,45 @@ def _format_table(label, categories, active_total, idle_time, app_rows, title_ro
             seconds = _row_seconds(row)
             lines.append(f"  {row['app_name']:<15} {title:<35} {_format_duration(seconds)}")
 
+    if url_rows:
+        lines.append("")
+        lines.append("  [URL 线索 Top 10]")
+        for row in url_rows:
+            url = row["browser_url"]
+            if len(url) > 80:
+                url = url[:77] + "..."
+            lines.append(f"  - {row['app_name']}: {url}")
+
+    if project_rows:
+        lines.append("")
+        lines.append("  [项目线索]")
+        for row in project_rows:
+            lines.append(f"  - {row['project_name']}: {_format_duration(_row_seconds(row))}")
+
+    if intent_rows:
+        lines.append("")
+        lines.append("  [意图归类]")
+        for row in intent_rows:
+            lines.append(f"  - {intent_label(row['intent'])}: {_format_duration(_row_seconds(row))}")
+
+    if evidence_rows:
+        lines.append("")
+        lines.append("  [屏幕理解线索]")
+        for row in evidence_rows[:5]:
+            summary = row["screen_summary"]
+            if len(summary) > 100:
+                summary = summary[:97] + "..."
+            lines.append(f"  - {summary}")
+
+    if activity_evidence_rows:
+        lines.append("")
+        lines.append("  [文本/终端线索]")
+        for row in activity_evidence_rows[:5]:
+            text = row.get("text_evidence") or row.get("terminal_evidence") or ""
+            if len(text) > 100:
+                text = text[:97] + "..."
+            lines.append(f"  - {text}")
+
     if analysis:
         lines.append("")
         lines.append("  [分析摘要]")
@@ -301,7 +429,7 @@ def _format_table(label, categories, active_total, idle_time, app_rows, title_ro
     return "\n".join(lines)
 
 
-def _format_markdown(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+def _format_markdown(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None, url_rows=None, evidence_rows=None, project_rows=None, intent_rows=None, activity_evidence_rows=None) -> str:
     lines = []
 
     lines.append(f"# WorkPulse {label}报告")
@@ -343,6 +471,32 @@ def _format_markdown(label, categories, active_total, idle_time, app_rows, title
             seconds = _row_seconds(row)
             lines.append(f"| {row['app_name']} | {title} | {_format_duration(seconds)} |")
 
+    if url_rows:
+        lines.extend(["", "## URL 线索 Top 10", ""])
+        for row in url_rows:
+            lines.append(f"- {row['app_name']}: {row['browser_url']}")
+
+    if project_rows:
+        lines.extend(["", "## 项目线索", ""])
+        for row in project_rows:
+            lines.append(f"- {row['project_name']}: {_format_duration(_row_seconds(row))}")
+
+    if intent_rows:
+        lines.extend(["", "## 意图归类", ""])
+        for row in intent_rows:
+            lines.append(f"- {intent_label(row['intent'])}: {_format_duration(_row_seconds(row))}")
+
+    if evidence_rows:
+        lines.extend(["", "## 屏幕理解线索", ""])
+        for row in evidence_rows[:10]:
+            lines.append(f"- {row['screen_summary']}")
+
+    if activity_evidence_rows:
+        lines.extend(["", "## 文本/终端线索", ""])
+        for row in activity_evidence_rows[:10]:
+            text = row.get("text_evidence") or row.get("terminal_evidence") or ""
+            lines.append(f"- {text}")
+
     if analysis:
         lines.extend(["", "## 分析摘要", ""])
         for item in analysis["findings"]:
@@ -353,7 +507,7 @@ def _format_markdown(label, categories, active_total, idle_time, app_rows, title
     return "\n".join(lines)
 
 
-def _format_html(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None) -> str:
+def _format_html(label, categories, active_total, idle_time, app_rows, title_rows, analysis=None, url_rows=None, evidence_rows=None, project_rows=None, intent_rows=None, activity_evidence_rows=None) -> str:
     category_rows = "".join(
         f"<tr><td>{html.escape(cat)}</td><td>{_format_duration(seconds)}</td><td>{(seconds / active_total * 100) if active_total else 0:.1f}%</td></tr>"
         for cat, seconds in sorted(categories.items(), key=lambda x: -x[1])
@@ -365,6 +519,26 @@ def _format_html(label, categories, active_total, idle_time, app_rows, title_row
     title_table_rows = "".join(
         f"<tr><td>{html.escape(str(row['app_name']))}</td><td>{html.escape(str(row['window_title']))}</td><td>{_format_duration(_row_seconds(row))}</td></tr>"
         for row in title_rows
+    )
+    url_items = "".join(
+        f"<li><strong>{html.escape(str(row['app_name']))}</strong>: {html.escape(str(row['browser_url']))}</li>"
+        for row in (url_rows or [])
+    )
+    evidence_items = "".join(
+        f"<li>{html.escape(str(row['screen_summary']))}</li>"
+        for row in (evidence_rows or [])[:10]
+    )
+    project_items = "".join(
+        f"<li><strong>{html.escape(str(row['project_name']))}</strong>: {_format_duration(_row_seconds(row))}</li>"
+        for row in (project_rows or [])
+    )
+    intent_items = "".join(
+        f"<li><strong>{html.escape(intent_label(str(row['intent'])))}</strong>: {_format_duration(_row_seconds(row))}</li>"
+        for row in (intent_rows or [])
+    )
+    activity_items = "".join(
+        f"<li>{html.escape(str(row.get('text_evidence') or row.get('terminal_evidence') or ''))}</li>"
+        for row in (activity_evidence_rows or [])[:10]
     )
 
     analysis_block = ""
@@ -486,6 +660,26 @@ def _format_html(label, categories, active_total, idle_time, app_rows, title_row
       </table>
     </section>
     {analysis_block}
+    <section>
+      <h2>URL 线索</h2>
+      <ul>{url_items}</ul>
+    </section>
+    <section>
+      <h2>项目线索</h2>
+      <ul>{project_items}</ul>
+    </section>
+    <section>
+      <h2>意图归类</h2>
+      <ul>{intent_items}</ul>
+    </section>
+    <section>
+      <h2>文本/终端线索</h2>
+      <ul>{activity_items}</ul>
+    </section>
+    <section>
+      <h2>屏幕理解线索</h2>
+      <ul>{evidence_items}</ul>
+    </section>
   </main>
 </body>
 </html>
